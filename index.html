@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<title>헬스노트</title>
+<meta name="theme-color" content="#0f0f0f" />
+<meta name="description" content="운동, 인바디, AI 루틴 추천을 한번에 관리하는 헬스노트" />
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json" />
+
+<!-- iOS PWA support -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="헬스노트" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <header class="topbar">
+    <h1 id="topbar-title">홈</h1>
+    <span class="topbar-date" id="topbar-date"></span>
+  </header>
+
+  <main id="views">
+
+    <!-- 홈 -->
+    <section class="view" id="view-home" data-view="home">
+      <div class="card">
+        <h2 class="card-title">오늘 운동 요약</h2>
+        <div id="home-workout-summary" class="summary-list">
+          <p class="empty-hint">오늘 기록된 운동이 없어요.</p>
+        </div>
+      </div>
+
+      <div class="card" id="goal-progress-card">
+        <h2 class="card-title">목표 진행률</h2>
+        <div id="goal-progress-content"></div>
+      </div>
+
+      <div class="card calendar-card">
+        <div class="calendar-header">
+          <button type="button" class="calendar-nav-btn" id="btn-prev-month">‹</button>
+          <span id="calendar-month-label" class="calendar-month-label"></span>
+          <button type="button" class="calendar-nav-btn" id="btn-next-month">›</button>
+        </div>
+        <div class="calendar-weekdays">
+          <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+        </div>
+        <div class="calendar-grid" id="calendar-grid"></div>
+        <div class="calendar-stats" id="calendar-stats"></div>
+      </div>
+
+      <div class="card" id="calendar-day-detail" hidden>
+        <div class="section-header">
+          <h2 class="card-title" id="calendar-day-title"></h2>
+          <button class="btn btn-ghost btn-sm" id="btn-close-day-detail">닫기</button>
+        </div>
+        <div id="calendar-day-logs" class="summary-list"></div>
+      </div>
+    </section>
+
+    <!-- 운동 -->
+    <section class="view" id="view-workout" data-view="workout" hidden>
+      <div class="card">
+        <h2 class="card-title">이번 주 추천 설정</h2>
+        <div class="form-grid">
+          <label>주 몇 회 헬스장<input type="number" id="weekly-gym-days" min="0" max="7" /></label>
+          <label>주 몇 회 러닝<input type="number" id="weekly-run-days" min="0" max="7" /></label>
+        </div>
+        <button class="btn btn-ai btn-block" id="btn-recommend-routine">
+          📅 이번 주 루틴 받기
+        </button>
+      </div>
+
+      <div class="card routine-card" id="routine-result">
+        <h2 class="card-title">이번 주 추천 루틴</h2>
+        <div id="routine-text" class="routine-text">아직 추천받은 루틴이 없어요. 위 버튼을 눌러 이번 주 루틴을 받아보세요.</div>
+        <div class="routine-updated" id="routine-updated-at"></div>
+      </div>
+
+      <div class="section-header">
+        <h2 class="card-title">오늘 운동 기록</h2>
+        <button class="btn btn-primary btn-sm" id="btn-add-workout">+ 운동 추가</button>
+      </div>
+      <div id="workout-log-list" class="summary-list">
+        <p class="empty-hint">오늘 기록된 운동이 없어요.</p>
+      </div>
+
+      <div class="card" id="rest-timer-card" hidden>
+        <h2 class="card-title">쉬는시간</h2>
+        <div class="timer-display" id="timer-display">00:00</div>
+        <div class="timer-actions">
+          <button class="btn btn-ghost btn-sm" id="btn-timer-minus">-15s</button>
+          <button class="btn btn-primary btn-sm" id="btn-timer-toggle">시작</button>
+          <button class="btn btn-ghost btn-sm" id="btn-timer-plus">+15s</button>
+          <button class="btn btn-ghost btn-sm" id="btn-timer-reset">리셋</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">운동 통계</h2>
+
+        <div class="stats-block">
+          <h3 class="stats-subtitle">기구별 최고 중량 추이</h3>
+          <select id="stats-equipment-select"></select>
+          <canvas id="chart-max-weight" width="380" height="160"></canvas>
+        </div>
+
+        <div class="stats-block">
+          <h3 class="stats-subtitle">주간 운동 볼륨</h3>
+          <canvas id="chart-weekly-volume" width="380" height="160"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- 인바디 -->
+    <section class="view" id="view-inbody" data-view="inbody" hidden>
+      <div class="card">
+        <h2 class="card-title">인바디 기록 추가</h2>
+        <form id="inbody-form" class="form-grid">
+          <label>측정일<input type="date" id="inbody-date" required /></label>
+          <label>체중(kg)<input type="number" step="0.1" id="inbody-weight" required /></label>
+          <label>체지방률(%)<input type="number" step="0.1" id="inbody-fat" required /></label>
+          <label>골격근량(kg)<input type="number" step="0.1" id="inbody-muscle" required /></label>
+          <label>BMI<input type="number" step="0.1" id="inbody-bmi" required /></label>
+          <label>내장지방레벨<input type="number" step="1" id="inbody-visceral" required /></label>
+          <button type="submit" class="btn btn-primary btn-block">기록 추가</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title" id="inbody-chart-title">체중 변화</h2>
+        <div class="pill-row" id="inbody-metric-tabs">
+          <button type="button" class="pill active" data-metric="weight" data-unit="kg">체중</button>
+          <button type="button" class="pill" data-metric="bodyFat" data-unit="%">체지방률</button>
+          <button type="button" class="pill" data-metric="muscleMass" data-unit="kg">골격근량</button>
+          <button type="button" class="pill" data-metric="bmi" data-unit="">BMI</button>
+          <button type="button" class="pill" data-metric="visceralFat" data-unit="">내장지방레벨</button>
+        </div>
+        <canvas id="chart-inbody" width="380" height="160"></canvas>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">기록 리스트</h2>
+        <div id="inbody-list" class="summary-list">
+          <p class="empty-hint">아직 기록이 없어요.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 설정 -->
+    <section class="view" id="view-settings" data-view="settings" hidden>
+      <div class="card">
+        <h2 class="card-title">내 목표</h2>
+        <form id="goals-form" class="form-grid">
+          <label>현재 체중(kg)<input type="number" step="0.1" id="goal-current-weight" /></label>
+          <label>목표 체중(kg)<input type="number" step="0.1" id="goal-target-weight" /></label>
+          <label>목표 체지방률(%)<input type="number" step="0.1" id="goal-target-fat" /></label>
+          <label>목표 골격근량(kg)<input type="number" step="0.1" id="goal-target-muscle" /></label>
+          <label>목표 메모<input type="text" id="goal-note" placeholder="예: 여름까지 체지방 5% 감량" /></label>
+          <button type="submit" class="btn btn-primary btn-block">저장</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Gemini API 키</h2>
+        <form id="api-key-form" class="form-grid">
+          <label>API 키
+            <input type="password" id="gemini-api-key" placeholder="AIza..." autocomplete="off" />
+          </label>
+          <button type="submit" class="btn btn-primary btn-block">저장</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">기본 쉬는시간(초)</h2>
+        <form id="rest-time-form" class="form-grid">
+          <label>초 단위
+            <input type="number" id="default-rest-seconds" min="10" step="5" />
+          </label>
+          <button type="submit" class="btn btn-primary btn-block">저장</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">헬스장 기구 등록</h2>
+        <form id="equipment-form" class="form-grid">
+          <label>기구명<input type="text" id="equipment-name" required /></label>
+          <label>카테고리
+            <select id="equipment-category">
+              <option value="가슴">가슴</option>
+              <option value="등">등</option>
+              <option value="하체">하체</option>
+              <option value="어깨">어깨</option>
+              <option value="팔">팔</option>
+              <option value="복근">복근</option>
+              <option value="유산소">유산소</option>
+            </select>
+          </label>
+          <button type="submit" class="btn btn-primary btn-block">추가</button>
+        </form>
+        <div id="equipment-list" class="summary-list"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">데이터 관리</h2>
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" id="btn-export-data">데이터 내보내기</button>
+          <button type="button" class="btn" id="btn-import-data">데이터 가져오기</button>
+        </div>
+        <input type="file" id="import-file-input" accept="application/json" hidden />
+      </div>
+    </section>
+
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab-btn active" data-target="home">
+      <span class="tab-icon">🏠</span><span class="tab-label">홈</span>
+    </button>
+    <button class="tab-btn" data-target="workout">
+      <span class="tab-icon">🏋️</span><span class="tab-label">운동</span>
+    </button>
+    <button class="tab-btn" data-target="inbody">
+      <span class="tab-icon">📊</span><span class="tab-label">인바디</span>
+    </button>
+    <button class="tab-btn" data-target="settings">
+      <span class="tab-icon">⚙️</span><span class="tab-label">설정</span>
+    </button>
+  </nav>
+
+</div>
+
+<!-- 운동 추가 모달 -->
+<div class="modal-overlay" id="modal-add-workout" hidden>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h2 class="card-title">운동 추가</h2>
+
+    <div class="segmented" id="workout-type-toggle">
+      <button class="segmented-btn active" data-type="weight">웨이트</button>
+      <button class="segmented-btn" data-type="running">러닝</button>
+    </div>
+
+    <div id="form-weight" class="form-grid">
+      <label>기구 선택
+        <select id="weight-equipment"></select>
+      </label>
+
+      <button type="button" class="btn btn-ghost btn-block" id="btn-add-set">+ 세트 추가</button>
+
+      <div class="set-entry form-grid" id="set-entry" hidden>
+        <div class="segmented" id="weight-unit-toggle">
+          <button type="button" class="segmented-btn active" data-unit="kg">kg</button>
+          <button type="button" class="segmented-btn" data-unit="lb">lb</button>
+          <button type="button" class="segmented-btn" data-unit="none">무게없음</button>
+        </div>
+        <label id="set-weight-label">무게<input type="number" step="0.5" id="set-weight" /></label>
+        <label>횟수<input type="number" id="set-reps" min="1" /></label>
+        <button type="button" class="btn btn-primary btn-block" id="btn-record-set">기록</button>
+      </div>
+
+      <div id="set-list" class="summary-list"></div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="btn-cancel-weight">취소</button>
+        <button type="button" class="btn btn-primary" id="btn-finish-weight">운동 완료</button>
+      </div>
+    </div>
+
+    <form id="form-running" class="form-grid" hidden>
+      <label>거리(km)<input type="number" step="0.01" id="running-distance" required /></label>
+      <label>시간(분)<input type="number" step="0.1" id="running-duration" required /></label>
+      <div class="pace-preview">페이스: <span id="running-pace-preview">-</span> 분/km</div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="btn-cancel-running">취소</button>
+        <button type="submit" class="btn btn-primary">추가</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
