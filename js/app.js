@@ -1,5 +1,5 @@
 import * as db from "./db.js";
-import { getRoutineRecommendation } from "./gemini.js";
+import { streamRoutineRecommendation, sanitizeApiKey } from "./gemini.js";
 import { RestTimer } from "./timer.js";
 import { drawLineChart, drawBarChart } from "./chart.js";
 
@@ -279,14 +279,70 @@ async function renderWorkoutTab() {
   const logs = await db.getWorkoutLogsByDate(todayStr());
   renderWorkoutLogList(logs);
 
-  const prefs = await db.getSetting("weeklyRoutinePrefs", { gymDays: 3, runDays: 2 });
-  $("#weekly-gym-days").value = prefs.gymDays;
-  $("#weekly-run-days").value = prefs.runDays;
+  const prefs = await db.getSetting("weeklyRoutinePrefs", { gymDays: ["월", "수", "금"], runDays: ["화", "목"] });
+  gymDaySelection = new Set(prefs.gymDays || []);
+  runDaySelection = new Set(prefs.runDays || []);
+  applyDaySelectionToButtons("#gym-day-picker", gymDaySelection);
+  applyDaySelectionToButtons("#run-day-picker", runDaySelection);
+  updateDayConflictWarning();
 
   renderStoredRoutine(await db.getSetting("weeklyRoutine", null));
 
   await renderWorkoutStats();
 }
+
+/* ---------------- workout tab: weekly routine day picker ---------------- */
+
+const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
+
+let gymDaySelection = new Set();
+let runDaySelection = new Set();
+
+function applyDaySelectionToButtons(containerSelector, daySet) {
+  $$(".day-btn", $(containerSelector)).forEach((btn) => {
+    btn.classList.toggle("active", daySet.has(btn.dataset.day));
+  });
+}
+
+function updateDayConflictWarning() {
+  const overlap = DAY_LABELS.filter((d) => gymDaySelection.has(d) && runDaySelection.has(d));
+  $$(".day-btn", $("#gym-day-picker")).forEach((btn) => {
+    btn.classList.toggle("conflict", overlap.includes(btn.dataset.day));
+  });
+  $$(".day-btn", $("#run-day-picker")).forEach((btn) => {
+    btn.classList.toggle("conflict", overlap.includes(btn.dataset.day));
+  });
+  $("#day-picker-warning").hidden = overlap.length === 0;
+}
+
+async function saveDaySelections() {
+  await db.setSetting("weeklyRoutinePrefs", {
+    gymDays: DAY_LABELS.filter((d) => gymDaySelection.has(d)),
+    runDays: DAY_LABELS.filter((d) => runDaySelection.has(d)),
+  });
+}
+
+$$(".day-btn", $("#gym-day-picker")).forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const day = btn.dataset.day;
+    if (gymDaySelection.has(day)) gymDaySelection.delete(day);
+    else gymDaySelection.add(day);
+    btn.classList.toggle("active", gymDaySelection.has(day));
+    updateDayConflictWarning();
+    await saveDaySelections();
+  });
+});
+
+$$(".day-btn", $("#run-day-picker")).forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const day = btn.dataset.day;
+    if (runDaySelection.has(day)) runDaySelection.delete(day);
+    else runDaySelection.add(day);
+    btn.classList.toggle("active", runDaySelection.has(day));
+    updateDayConflictWarning();
+    await saveDaySelections();
+  });
+});
 
 /* ---------------- workout tab: stats charts ---------------- */
 
@@ -449,28 +505,37 @@ function renderWorkoutLogList(logs) {
 /* AI weekly routine recommendation */
 $("#btn-recommend-routine").addEventListener("click", async () => {
   const btn = $("#btn-recommend-routine");
-  const gymDays = Number($("#weekly-gym-days").value) || 0;
-  const runDays = Number($("#weekly-run-days").value) || 0;
-  await db.setSetting("weeklyRoutinePrefs", { gymDays, runDays });
+  const gymDays = DAY_LABELS.filter((d) => gymDaySelection.has(d));
+  const runDays = DAY_LABELS.filter((d) => runDaySelection.has(d));
+
+  if (!gymDays.length && !runDays.length) {
+    showToast("헬스장 또는 러닝 요일을 선택해주세요");
+    return;
+  }
 
   btn.disabled = true;
   btn.textContent = "추천 받는 중...";
+
+  const textEl = $("#routine-text");
+  const updatedEl = $("#routine-updated-at");
+  textEl.textContent = "";
+  updatedEl.textContent = "";
+
   try {
     const apiKey = await db.getSetting("geminiApiKey", "");
     const equipmentList = await db.getEquipmentList();
-    const recentLogs = await db.getRecentWorkoutLogs(7);
+    const recentLogs = await db.getRecentWorkoutLogs(3);
     const goals = await db.getSetting("fitnessGoals", null);
     const inbodyRecords = await db.getAllInbodyRecords();
     const latestInbody = inbodyRecords.length ? inbodyRecords[inbodyRecords.length - 1] : null;
 
-    const text = await getRoutineRecommendation(apiKey, {
-      equipmentList,
-      recentLogs,
-      goals,
-      latestInbody,
-      weeklyGymDays: gymDays,
-      weeklyRunDays: runDays,
-    });
+    const text = await streamRoutineRecommendation(
+      apiKey,
+      { equipmentList, recentLogs, goals, latestInbody, gymDays, runDays },
+      (_delta, fullTextSoFar) => {
+        textEl.textContent = fullTextSoFar;
+      }
+    );
 
     const routine = { text, generatedAt: Date.now() };
     await db.setSetting("weeklyRoutine", routine);
@@ -478,6 +543,7 @@ $("#btn-recommend-routine").addEventListener("click", async () => {
     showToast("이번 주 루틴이 갱신되었어요");
   } catch (err) {
     showToast(err.message || "루틴 추천에 실패했어요.");
+    renderStoredRoutine(await db.getSetting("weeklyRoutine", null));
   } finally {
     btn.disabled = false;
     btn.textContent = "📅 이번 주 루틴 받기";
@@ -769,6 +835,47 @@ $("#inbody-form").addEventListener("submit", async (e) => {
   showToast("인바디 기록이 추가되었어요");
 });
 
+/* default equipment seeded on first run (when equipment store is empty) */
+const DEFAULT_EQUIPMENT = [
+  { name: "스미스머신1", category: "하체" },
+  { name: "스미스머신2", category: "하체" },
+  { name: "스미스머신3", category: "하체" },
+  { name: "스미스머신4", category: "하체" },
+  { name: "스미스머신5", category: "하체" },
+  { name: "스미스머신6", category: "하체" },
+  { name: "로우머신", category: "등" },
+  { name: "사레레머신", category: "어깨" },
+  { name: "이두컬머신", category: "팔" },
+  { name: "햄머하이로우머신", category: "등" },
+  { name: "프론트랫풀다운머신", category: "등" },
+  { name: "랫풀다운머신", category: "등" },
+  { name: "어시스트풀업/딥스", category: "등" },
+  { name: "시티드로우머신A", category: "등" },
+  { name: "시티드로우머신B", category: "등" },
+  { name: "로우로우머신", category: "등" },
+  { name: "티바로우", category: "등" },
+  { name: "백익스텐션", category: "등" },
+  { name: "Level로우", category: "등" },
+  { name: "체스트프레스머신", category: "가슴" },
+  { name: "시티드체스트머신", category: "가슴" },
+  { name: "인클라인체스트프레스머신", category: "가슴" },
+  { name: "팩덱플라이", category: "가슴" },
+  { name: "듀얼시스템체스트프레스", category: "가슴" },
+  { name: "Pectoral machine", category: "가슴" },
+  { name: "레터럴레이즈머신", category: "어깨" },
+  { name: "숄더프레스머신A", category: "어깨" },
+  { name: "숄더프레스머신B", category: "어깨" },
+  { name: "라잉레그컬", category: "하체" },
+  { name: "레그익스텐션", category: "하체" },
+  { name: "이너/아웃타이머신", category: "하체" },
+  { name: "스쿼트머신", category: "하체" },
+  { name: "티스쿼트", category: "하체" },
+  { name: "핵스쿼트", category: "하체" },
+  { name: "글루트머신(힙)", category: "하체" },
+  { name: "이지바", category: "팔" },
+  { name: "플랩바", category: "팔" },
+];
+
 /* ---------------- settings tab ---------------- */
 
 async function renderSettingsTab() {
@@ -785,33 +892,116 @@ async function renderSettingsTab() {
   await renderEquipmentList();
 }
 
+let settingsEquipmentCache = [];
+
 async function renderEquipmentList() {
-  const list = await db.getEquipmentList();
+  settingsEquipmentCache = await db.getEquipmentList();
   const container = $("#equipment-list");
-  if (!list.length) {
+  if (!settingsEquipmentCache.length) {
     container.innerHTML = `<p class="empty-hint">등록된 기구가 없어요.</p>`;
     return;
   }
   container.innerHTML = "";
-  list.forEach((eq) => {
+  settingsEquipmentCache.forEach((eq) => {
     const div = document.createElement("div");
-    div.className = "log-item";
+    div.className = "log-item equipment-item";
+    const thumb = eq.photo
+      ? `<img class="equipment-thumb" src="${eq.photo}" alt="${eq.name}" />`
+      : `<div class="equipment-thumb equipment-thumb-placeholder">🏋️</div>`;
     div.innerHTML = `
+      ${thumb}
       <div class="log-main">
         <span class="log-title">${eq.name}</span>
-        <span class="log-sub">${eq.category}</span>
+        <span class="log-sub">${eq.category}${eq.memo ? ` · ${eq.memo}` : ""}</span>
       </div>
-      <button class="log-delete" data-id="${eq.id}">✕</button>`;
+      <div class="equipment-item-actions">
+        <button type="button" class="icon-btn equipment-edit" data-id="${eq.id}">✏️</button>
+        <button type="button" class="icon-btn equipment-delete" data-id="${eq.id}">🗑️</button>
+      </div>`;
     container.appendChild(div);
   });
-  $$(".log-delete", container).forEach((btn) => {
+
+  $$(".equipment-delete", container).forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!confirm("정말 삭제할까요?")) return;
       await db.deleteEquipment(Number(btn.dataset.id));
       await renderEquipmentList();
     });
   });
+
+  $$(".equipment-edit", container).forEach((btn) => {
+    btn.addEventListener("click", () => openEditEquipmentModal(Number(btn.dataset.id)));
+  });
 }
+
+/* equipment edit modal */
+let editingEquipmentId = null;
+let pendingEditPhoto;
+
+function openEditEquipmentModal(id) {
+  const eq = settingsEquipmentCache.find((e) => e.id === id);
+  if (!eq) return;
+  editingEquipmentId = id;
+  pendingEditPhoto = undefined;
+
+  $("#edit-equipment-name").value = eq.name;
+  $("#edit-equipment-category").value = eq.category;
+  $("#edit-equipment-memo").value = eq.memo || "";
+
+  const preview = $("#edit-equipment-photo-preview");
+  if (eq.photo) {
+    preview.src = eq.photo;
+    preview.hidden = false;
+  } else {
+    preview.src = "";
+    preview.hidden = true;
+  }
+
+  $("#modal-edit-equipment").hidden = false;
+}
+
+function closeEditEquipmentModal() {
+  $("#modal-edit-equipment").hidden = true;
+  editingEquipmentId = null;
+  pendingEditPhoto = undefined;
+  $("#form-edit-equipment").reset();
+  $("#edit-equipment-photo-preview").hidden = true;
+}
+
+$("#btn-cancel-edit-equipment").addEventListener("click", closeEditEquipmentModal);
+
+$("#btn-edit-equipment-photo").addEventListener("click", () => {
+  $("#edit-equipment-photo-input").click();
+});
+
+$("#edit-equipment-photo-input").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    pendingEditPhoto = reader.result;
+    const preview = $("#edit-equipment-photo-preview");
+    preview.src = reader.result;
+    preview.hidden = false;
+  };
+  reader.readAsDataURL(file);
+});
+
+$("#form-edit-equipment").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (editingEquipmentId == null) return;
+  const name = $("#edit-equipment-name").value.trim();
+  if (!name) return;
+  const category = $("#edit-equipment-category").value;
+  const memo = $("#edit-equipment-memo").value.trim();
+  const existing = settingsEquipmentCache.find((eItem) => eItem.id === editingEquipmentId);
+  const photo = pendingEditPhoto !== undefined ? pendingEditPhoto : existing?.photo ?? null;
+
+  await db.updateEquipment(editingEquipmentId, { name, category, memo, photo });
+  closeEditEquipmentModal();
+  await renderEquipmentList();
+  showToast("기구가 수정되었어요");
+});
 
 $("#goals-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -828,7 +1018,9 @@ $("#goals-form").addEventListener("submit", async (e) => {
 
 $("#api-key-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  await db.setSetting("geminiApiKey", $("#gemini-api-key").value.trim());
+  const key = sanitizeApiKey($("#gemini-api-key").value);
+  await db.setSetting("geminiApiKey", key);
+  $("#gemini-api-key").value = key;
   showToast("API 키가 저장되었어요");
 });
 
@@ -839,13 +1031,36 @@ $("#rest-time-form").addEventListener("submit", async (e) => {
   showToast("기본 쉬는시간이 저장되었어요");
 });
 
+let pendingAddPhoto = null;
+
+$("#btn-equipment-photo").addEventListener("click", () => {
+  $("#equipment-photo-input").click();
+});
+
+$("#equipment-photo-input").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    pendingAddPhoto = reader.result;
+    const preview = $("#equipment-photo-preview");
+    preview.src = reader.result;
+    preview.hidden = false;
+  };
+  reader.readAsDataURL(file);
+});
+
 $("#equipment-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("#equipment-name").value.trim();
   const category = $("#equipment-category").value;
+  const memo = $("#equipment-memo").value.trim();
   if (!name) return;
-  await db.addEquipment(name, category);
+  await db.addEquipment({ name, category, memo, photo: pendingAddPhoto });
   $("#equipment-form").reset();
+  pendingAddPhoto = null;
+  $("#equipment-photo-preview").hidden = true;
+  $("#equipment-photo-preview").src = "";
   await renderEquipmentList();
   showToast("기구가 추가되었어요");
 });
@@ -913,6 +1128,7 @@ function initTopbarDate() {
 
 async function init() {
   initTopbarDate();
+  await db.seedDefaultEquipmentIfEmpty(DEFAULT_EQUIPMENT);
   await renderHomeTab();
 
   if ("serviceWorker" in navigator) {

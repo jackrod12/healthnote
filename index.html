@@ -70,10 +70,35 @@
     <section class="view" id="view-workout" data-view="workout" hidden>
       <div class="card">
         <h2 class="card-title">이번 주 추천 설정</h2>
-        <div class="form-grid">
-          <label>주 몇 회 헬스장<input type="number" id="weekly-gym-days" min="0" max="7" /></label>
-          <label>주 몇 회 러닝<input type="number" id="weekly-run-days" min="0" max="7" /></label>
+
+        <div class="day-picker-group">
+          <span class="day-picker-label">헬스장 요일</span>
+          <div class="day-picker" id="gym-day-picker">
+            <button type="button" class="day-btn" data-day="월">월</button>
+            <button type="button" class="day-btn" data-day="화">화</button>
+            <button type="button" class="day-btn" data-day="수">수</button>
+            <button type="button" class="day-btn" data-day="목">목</button>
+            <button type="button" class="day-btn" data-day="금">금</button>
+            <button type="button" class="day-btn" data-day="토">토</button>
+            <button type="button" class="day-btn" data-day="일">일</button>
+          </div>
         </div>
+
+        <div class="day-picker-group">
+          <span class="day-picker-label">러닝 요일</span>
+          <div class="day-picker" id="run-day-picker">
+            <button type="button" class="day-btn" data-day="월">월</button>
+            <button type="button" class="day-btn" data-day="화">화</button>
+            <button type="button" class="day-btn" data-day="수">수</button>
+            <button type="button" class="day-btn" data-day="목">목</button>
+            <button type="button" class="day-btn" data-day="금">금</button>
+            <button type="button" class="day-btn" data-day="토">토</button>
+            <button type="button" class="day-btn" data-day="일">일</button>
+          </div>
+        </div>
+
+        <p class="day-picker-warning" id="day-picker-warning" hidden>⚠️ 헬스장과 러닝 요일이 겹쳐요</p>
+
         <button class="btn btn-ai btn-block" id="btn-recommend-routine">
           📅 이번 주 루틴 받기
         </button>
@@ -204,6 +229,12 @@
               <option value="유산소">유산소</option>
             </select>
           </label>
+          <label>메모<input type="text" id="equipment-memo" placeholder="예: 창가 쪽, 최대 120kg" /></label>
+          <div class="photo-field">
+            <button type="button" class="btn btn-ghost btn-block" id="btn-equipment-photo">📷 사진 추가</button>
+            <input type="file" id="equipment-photo-input" accept="image/*" capture="environment" hidden />
+            <img id="equipment-photo-preview" class="photo-preview" hidden />
+          </div>
           <button type="submit" class="btn btn-primary btn-block">추가</button>
         </form>
         <div id="equipment-list" class="summary-list"></div>
@@ -282,6 +313,39 @@
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" id="btn-cancel-running">취소</button>
         <button type="submit" class="btn btn-primary">추가</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+
+<!-- 기구 수정 모달 -->
+<div class="modal-overlay" id="modal-edit-equipment" hidden>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h2 class="card-title">기구 수정</h2>
+    <form id="form-edit-equipment" class="form-grid">
+      <label>기구명<input type="text" id="edit-equipment-name" required /></label>
+      <label>카테고리
+        <select id="edit-equipment-category">
+          <option value="가슴">가슴</option>
+          <option value="등">등</option>
+          <option value="하체">하체</option>
+          <option value="어깨">어깨</option>
+          <option value="팔">팔</option>
+          <option value="복근">복근</option>
+          <option value="유산소">유산소</option>
+        </select>
+      </label>
+      <label>메모<input type="text" id="edit-equipment-memo" placeholder="예: 창가 쪽, 최대 120kg" /></label>
+      <div class="photo-field">
+        <button type="button" class="btn btn-ghost btn-block" id="btn-edit-equipment-photo">📷 사진 변경</button>
+        <input type="file" id="edit-equipment-photo-input" accept="image/*" capture="environment" hidden />
+        <img id="edit-equipment-photo-preview" class="photo-preview" hidden />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="btn-cancel-edit-equipment">취소</button>
+        <button type="submit" class="btn btn-primary">저장</button>
       </div>
     </form>
   </div>

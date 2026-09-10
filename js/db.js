@@ -50,14 +50,32 @@ export async function getEquipmentList() {
   return db.getAll("equipment");
 }
 
-export async function addEquipment(name, category) {
+export async function addEquipment(data) {
   const db = await getDB();
-  return db.add("equipment", { name, category });
+  return db.add("equipment", data);
+}
+
+export async function updateEquipment(id, data) {
+  const db = await getDB();
+  await db.put("equipment", { ...data, id });
 }
 
 export async function deleteEquipment(id) {
   const db = await getDB();
   await db.delete("equipment", id);
+}
+
+export async function seedDefaultEquipmentIfEmpty(defaultList) {
+  const db = await getDB();
+  const existing = await db.getAll("equipment");
+  if (existing.length > 0) return;
+  const tx = db.transaction("equipment", "readwrite");
+  await Promise.all([
+    ...defaultList.map((item) =>
+      tx.store.add({ name: item.name, category: item.category, photo: null, memo: "" })
+    ),
+    tx.done,
+  ]);
 }
 
 /* ---------- workout logs ---------- */
