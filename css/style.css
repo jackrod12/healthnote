@@ -993,3 +993,60 @@ input[type="range"] {
   color: var(--text-dim);
   margin-top: 2px;
 }
+
+/* Weight prediction */
+.prediction-line {
+  font-size: 14px;
+  margin: 0 0 6px;
+  color: var(--text);
+}
+
+.prediction-line:last-child { margin-bottom: 0; }
+
+.prediction-date {
+  font-weight: 700;
+}
+
+.prediction-rate {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.prediction-achieved {
+  font-weight: 700;
+  color: var(--mint);
+}
+
+/* Notification settings */
+.notify-permission-status {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.notify-permission-status.granted { color: var(--mint); }
+.notify-permission-status.denied { color: var(--danger); }
+
+.weekday-toggle-row {
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.weekday-toggle-btn {
+  flex: 1;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card-alt);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.weekday-toggle-btn.active {
+  background: var(--mint);
+  border-color: var(--mint);
+  color: #08251a;
+}

@@ -66,6 +66,7 @@ async function renderHomeTab() {
   const logs = await db.getWorkoutLogsByDate(todayStr());
   renderHomeWorkoutSummary(logs);
   await renderGoalProgress();
+  await renderWeightPrediction();
   await renderCalendar();
   await renderHomeCalorieStats();
 }
@@ -163,6 +164,74 @@ async function renderGoalProgress() {
     `;
     container.appendChild(div);
   });
+}
+
+/* ---------------- home tab: weight goal prediction ---------------- */
+
+function parseYmd(dateStr) {
+  return new Date(`${dateStr}T00:00:00`);
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function formatKoreanDate(date) {
+  return date.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
+}
+
+async function renderWeightPrediction() {
+  const container = $("#weight-prediction-content");
+  const goals = await db.getSetting("fitnessGoals", null);
+  const targetWeight = goals?.targetWeight;
+
+  if (!targetWeight) {
+    container.innerHTML = `<p class="empty-hint">설정 탭에서 목표 체중을 입력해주세요</p>`;
+    return;
+  }
+
+  const records = await db.getAllInbodyRecords();
+  if (!records.length) {
+    container.innerHTML = `<p class="empty-hint">인바디 탭에서 첫 기록을 입력해주세요</p>`;
+    return;
+  }
+
+  const latest = records[records.length - 1];
+  const latestDate = parseYmd(latest.date);
+
+  if (latest.weight <= targetWeight) {
+    container.innerHTML = `<p class="prediction-line prediction-achieved">🎉 목표 체중 달성!</p>`;
+    return;
+  }
+
+  const fourWeeksAgo = addDays(latestDate, -28);
+  const priorCandidates = records.filter((r) => parseYmd(r.date) <= fourWeeksAgo);
+
+  if (!priorCandidates.length) {
+    container.innerHTML = `<p class="empty-hint">데이터가 더 쌓이면 예측할 수 있어요 (현재 ${records.length}개)</p>`;
+    return;
+  }
+
+  const baseline = priorCandidates[priorCandidates.length - 1];
+  const baselineDate = parseYmd(baseline.date);
+  const elapsedWeeks = (latestDate - baselineDate) / (1000 * 60 * 60 * 24 * 7);
+  const weeklyLossKg = (baseline.weight - latest.weight) / elapsedWeeks;
+
+  if (weeklyLossKg <= 0) {
+    container.innerHTML = `<p class="empty-hint">현재 감량 추이가 없어요</p>`;
+    return;
+  }
+
+  const remainingKg = latest.weight - targetWeight;
+  const weeksNeeded = remainingKg / weeklyLossKg;
+  const predictedDate = addDays(latestDate, Math.round(weeksNeeded * 7));
+
+  container.innerHTML = `
+    <p class="prediction-line prediction-date">📅 목표 체중 달성 예상일: ${formatKoreanDate(predictedDate)}</p>
+    <p class="prediction-line prediction-rate">현재 주당 평균 -${weeklyLossKg.toFixed(1)}kg 감량 중</p>
+  `;
 }
 
 function renderHomeWorkoutSummary(logs) {
@@ -1529,6 +1598,92 @@ btnToggleGoalsForm.addEventListener("click", () => {
   else closeGoalsForm();
 });
 
+/* ---------------- settings tab: workout notification ---------------- */
+
+const NOTIFY_SETTINGS_KEY = "workoutNotify";
+let selectedNotifyDays = new Set();
+
+function updateNotifyPermissionStatus(permissionOverride) {
+  const el = $("#notify-permission-status");
+  const btn = $("#btn-notify-permission");
+  if (!("Notification" in window)) {
+    el.textContent = "이 브라우저는 알림을 지원하지 않아요";
+    el.className = "notify-permission-status denied";
+    btn.disabled = true;
+    return;
+  }
+  const permission = permissionOverride ?? Notification.permission;
+  if (permission === "granted") {
+    el.textContent = "✅ 알림이 허용되었어요";
+    el.className = "notify-permission-status granted";
+    btn.disabled = true;
+    btn.textContent = "🔔 알림 허용됨";
+  } else if (permission === "denied") {
+    el.textContent = "🚫 알림이 차단되었어요. 브라우저 설정에서 허용해주세요";
+    el.className = "notify-permission-status denied";
+    btn.disabled = false;
+    btn.textContent = "🔔 알림 허용";
+  } else {
+    el.textContent = "알림을 받으려면 허용해주세요";
+    el.className = "notify-permission-status";
+    btn.disabled = false;
+    btn.textContent = "🔔 알림 허용";
+  }
+}
+
+$("#btn-notify-permission").addEventListener("click", async () => {
+  if (!("Notification" in window)) return;
+  let permission = Notification.permission;
+  try {
+    permission = await Notification.requestPermission();
+  } catch {}
+  updateNotifyPermissionStatus(permission);
+});
+
+$$(".weekday-toggle-btn", $("#notify-weekday-row")).forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const day = btn.dataset.day;
+    if (selectedNotifyDays.has(day)) {
+      selectedNotifyDays.delete(day);
+    } else {
+      selectedNotifyDays.add(day);
+    }
+    btn.classList.toggle("active", selectedNotifyDays.has(day));
+  });
+});
+
+$("#btn-save-notify-settings").addEventListener("click", async () => {
+  const notifyTime = $("#notify-time-input").value || "09:00";
+  const notifyDays = [...selectedNotifyDays].map(Number).sort();
+
+  await db.setSetting(NOTIFY_SETTINGS_KEY, { notifyDays, notifyTime });
+
+  if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: "workout-notify-settings-updated" });
+  }
+
+  if ("serviceWorker" in navigator && "periodicSync" in ServiceWorkerRegistration.prototype) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.periodicSync.register("workout-reminder-check", { minInterval: 60 * 60 * 1000 });
+    } catch {}
+  }
+
+  showToast("알림 설정이 저장되었어요");
+});
+
+async function renderNotifySettings() {
+  updateNotifyPermissionStatus();
+
+  const saved = await db.getSetting(NOTIFY_SETTINGS_KEY, null);
+  selectedNotifyDays = new Set((saved?.notifyDays ?? []).map(String));
+  $("#notify-time-input").value = saved?.notifyTime ?? "09:00";
+
+  $$(".weekday-toggle-btn", $("#notify-weekday-row")).forEach((btn) => {
+    btn.classList.toggle("active", selectedNotifyDays.has(btn.dataset.day));
+  });
+}
+
 async function renderSettingsTab() {
   const goals = await db.getSetting("fitnessGoals", {});
   $("#goal-current-weight").value = goals.currentWeight ?? "";
@@ -1539,6 +1694,7 @@ async function renderSettingsTab() {
   renderGoalSummary(goals);
 
   await renderEquipmentList();
+  await renderNotifySettings();
 }
 
 let settingsEquipmentCache = [];

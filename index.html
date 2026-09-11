@@ -44,6 +44,11 @@
         <div id="goal-progress-content"></div>
       </div>
 
+      <div class="card" id="weight-prediction-card">
+        <h2 class="card-title">목표 달성 예측</h2>
+        <div id="weight-prediction-content"></div>
+      </div>
+
       <div class="card calendar-card">
         <div class="calendar-header">
           <button type="button" class="calendar-nav-btn" id="btn-prev-month">‹</button>
@@ -256,6 +261,28 @@
           <label>목표 메모<input type="text" id="goal-note" placeholder="예: 여름까지 체지방 5% 감량" /></label>
           <button type="submit" class="btn btn-primary btn-block">저장</button>
         </form>
+      </div>
+
+      <div class="card" id="notify-settings-card">
+        <h2 class="card-title">운동 알림 설정</h2>
+        <div id="notify-permission-status" class="notify-permission-status"></div>
+        <button type="button" class="btn btn-ghost btn-block" id="btn-notify-permission">🔔 알림 허용</button>
+
+        <div class="form-grid">
+          <label>알림 시간<input type="time" id="notify-time-input" value="09:00" /></label>
+
+          <div class="weekday-toggle-row" id="notify-weekday-row">
+            <button type="button" class="weekday-toggle-btn" data-day="1">월</button>
+            <button type="button" class="weekday-toggle-btn" data-day="2">화</button>
+            <button type="button" class="weekday-toggle-btn" data-day="3">수</button>
+            <button type="button" class="weekday-toggle-btn" data-day="4">목</button>
+            <button type="button" class="weekday-toggle-btn" data-day="5">금</button>
+            <button type="button" class="weekday-toggle-btn" data-day="6">토</button>
+            <button type="button" class="weekday-toggle-btn" data-day="0">일</button>
+          </div>
+
+          <button type="button" class="btn btn-primary btn-block" id="btn-save-notify-settings">알림 설정 저장</button>
+        </div>
       </div>
     </section>
 
