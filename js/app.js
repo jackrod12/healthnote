@@ -1,6 +1,6 @@
 import * as db from "./db.js";
 import { drawLineChart } from "./chart.js";
-import { evaluateAllBadges, renderBadgeIconSvg, BADGE_CATEGORIES } from "./badges.js";
+import { evaluateAllBadges, renderBadgeIconSvg, formatProgressText, BADGE_CATEGORIES } from "./badges.js";
 
 /* ---------------- helpers ---------------- */
 
@@ -1441,6 +1441,22 @@ $("#inbody-form").addEventListener("submit", async (e) => {
 let allBadgesCache = [];
 let selectedBadgeCategory = "all";
 
+const SEEN_BADGE_IDS_KEY = "seenAchievedBadgeIds";
+
+function getSeenBadgeIds() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(SEEN_BADGE_IDS_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSeenBadgeIds(idSet) {
+  try {
+    localStorage.setItem(SEEN_BADGE_IDS_KEY, JSON.stringify([...idSet]));
+  } catch {}
+}
+
 function formatBadgeDate(dateStr) {
   if (!dateStr) return "";
   const [y, m, d] = dateStr.split("-");
@@ -1472,7 +1488,6 @@ function renderBadgeCategoryTabs() {
 
 function renderFilteredBadgeGrid() {
   const grid = $("#badge-grid");
-  const categoryMeta = Object.fromEntries(BADGE_CATEGORIES.map((c) => [c.key, c]));
   const filtered =
     selectedBadgeCategory === "all" ? allBadgesCache : allBadgesCache.filter((b) => b.category === selectedBadgeCategory);
 
@@ -1481,24 +1496,46 @@ function renderFilteredBadgeGrid() {
     return;
   }
 
-  grid.innerHTML = filtered
+  // 달성한 뱃지를 먼저 보여주되, 각 그룹 내 원래 순서는 유지
+  const sorted = filtered
+    .map((b, i) => ({ b, i }))
+    .sort((x, y) => (y.b.achieved - x.b.achieved) || (x.i - y.i))
+    .map((x) => x.b);
+
+  const seenIds = getSeenBadgeIds();
+
+  grid.innerHTML = sorted
     .map((b) => {
-      const color = categoryMeta[b.category]?.color || "#FFD700";
-      const icon = renderBadgeIconSvg(b.icon, b.achieved, color);
+      const icon = renderBadgeIconSvg(b);
+      const isNew = b.achieved && !seenIds.has(b.id);
       const statusLine = b.achieved
         ? `<span class="badge-date">🎉 ${formatBadgeDate(b.achievedDate)} 달성</span>`
         : `<span class="badge-locked">🔒 미달성</span>`;
       return `
-        <div class="badge-card${b.achieved ? " achieved" : ""}">
-          <div class="badge-icon">${icon}</div>
+        <button type="button" class="badge-card${b.achieved ? " achieved" : ""}${isNew ? " badge-just-achieved" : ""}" data-badge-id="${b.id}">
+          <div class="badge-icon-wrap">
+            <div class="badge-icon">${icon}</div>
+            ${!b.achieved ? `<span class="badge-lock-overlay">🔒</span>` : ""}
+          </div>
           <div class="badge-info">
             <div class="badge-name">${b.name}</div>
             <div class="badge-desc">${b.description}</div>
             ${statusLine}
           </div>
-        </div>`;
+        </button>`;
     })
     .join("");
+
+  $$(".badge-card", grid).forEach((card) => {
+    card.addEventListener("click", () => openBadgeModal(card.dataset.badgeId));
+  });
+
+  // 새로 달성한 뱃지의 pulse 애니메이션은 한 번만 보여주고, 이후엔 seen 처리
+  const newlyAchievedIds = sorted.filter((b) => b.achieved).map((b) => b.id);
+  if (newlyAchievedIds.length) {
+    newlyAchievedIds.forEach((id) => seenIds.add(id));
+    saveSeenBadgeIds(seenIds);
+  }
 }
 
 function renderBadgeSummary() {
@@ -1510,6 +1547,39 @@ function renderBadgeSummary() {
     <div class="badge-summary-bar"><div class="badge-summary-bar-fill" style="width:${pct}%"></div></div>
   `;
 }
+
+function openBadgeModal(badgeId) {
+  const badge = allBadgesCache.find((b) => b.id === badgeId);
+  if (!badge) return;
+
+  const categoryLabel = BADGE_CATEGORIES.find((c) => c.key === badge.category)?.label || badge.category;
+  $("#badge-modal-icon").innerHTML = renderBadgeIconSvg(badge, { size: 80 });
+  $("#badge-modal-icon").classList.toggle("achieved", badge.achieved);
+  $("#badge-modal-name").textContent = badge.name;
+  $("#badge-modal-category").textContent = categoryLabel;
+  $("#badge-modal-desc").textContent = badge.description;
+
+  const statusEl = $("#badge-modal-status");
+  if (badge.achieved) {
+    statusEl.innerHTML = `
+      <p class="badge-modal-achieved-msg">🎉 축하해요! 뱃지를 획득했어요</p>
+      <p class="badge-modal-date">획득일: ${formatBadgeDate(badge.achievedDate)}</p>
+    `;
+  } else {
+    statusEl.innerHTML = `<p class="badge-modal-progress">📊 진행률: ${formatProgressText(badge)}</p>`;
+  }
+
+  $("#modal-badge-detail").hidden = false;
+}
+
+function closeBadgeModal() {
+  $("#modal-badge-detail").hidden = true;
+}
+
+$("#btn-close-badge-modal").addEventListener("click", closeBadgeModal);
+$("#modal-badge-detail").addEventListener("click", (e) => {
+  if (e.target.id === "modal-badge-detail") closeBadgeModal();
+});
 
 async function renderBadgesTab() {
   allBadgesCache = await evaluateAllBadges();

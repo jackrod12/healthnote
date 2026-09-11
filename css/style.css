@@ -904,7 +904,7 @@ input[type="range"] {
   #app { box-shadow: 0 0 40px rgba(0,0,0,0.6); }
 }
 
-/* Badges */
+/* Badges — 포켓몬 체육관 뱃지 스타일 */
 .badge-summary-count {
   font-size: 20px;
   font-weight: 700;
@@ -942,12 +942,32 @@ input[type="range"] {
   align-items: center;
   text-align: center;
   gap: 6px;
-  opacity: 0.65;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
 .badge-card.achieved {
-  opacity: 1;
   border-color: var(--mint-dim);
+}
+
+.badge-card:active {
+  transform: scale(0.97);
+}
+
+.badge-card.achieved:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 22px rgba(255, 215, 0, 0.35);
+  z-index: 2;
+}
+
+.badge-icon-wrap {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .badge-icon {
@@ -961,6 +981,54 @@ input[type="range"] {
 .badge-icon svg {
   width: 40px;
   height: 40px;
+}
+
+/* 미달성: 전체 grayscale + 30% 불투명도 */
+.badge-card:not(.achieved) .badge-icon {
+  filter: grayscale(1);
+  opacity: 0.3;
+}
+
+.badge-lock-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  filter: none;
+  opacity: 1;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+/* 달성 뱃지 반짝임: 카드를 가로지르는 대각선 하이라이트 스윕 */
+.badge-card.achieved .badge-icon-wrap::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  background: linear-gradient(120deg, transparent 35%, rgba(255, 255, 255, 0.55) 50%, transparent 65%);
+  background-size: 220% 220%;
+  background-position: -40% -40%;
+  animation: badge-shimmer 3.2s ease-in-out infinite;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+}
+
+@keyframes badge-shimmer {
+  0%, 15% { background-position: -60% -60%; }
+  55%, 100% { background-position: 60% 60%; }
+}
+
+/* 신규 달성 시 0.5초 pulse */
+.badge-card.badge-just-achieved .badge-icon-wrap {
+  animation: badge-pulse 0.5s ease;
+}
+
+@keyframes badge-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
 }
 
 .badge-info {
@@ -992,6 +1060,65 @@ input[type="range"] {
   font-size: 11px;
   color: var(--text-dim);
   margin-top: 2px;
+}
+
+/* 뱃지 상세 모달 */
+.badge-modal-sheet {
+  align-items: center;
+  text-align: center;
+}
+
+.badge-modal-icon {
+  width: 80px;
+  height: 80px;
+  margin: 4px auto 0;
+}
+
+.badge-modal-icon svg {
+  width: 80px;
+  height: 80px;
+}
+
+.badge-modal-icon:not(.achieved) {
+  filter: grayscale(1);
+  opacity: 0.3;
+}
+
+.badge-modal-name {
+  margin: 4px 0 0;
+}
+
+.badge-modal-category {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-modal-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+.badge-modal-achieved-msg {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--mint);
+  margin: 4px 0;
+}
+
+.badge-modal-date {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+.badge-modal-progress {
+  font-size: 14px;
+  color: var(--text);
+  margin: 4px 0;
 }
 
 /* Weight prediction */
