@@ -1,5 +1,4 @@
 import * as db from "./db.js";
-import { RestTimer } from "./timer.js";
 import { drawLineChart, drawBarChart } from "./chart.js";
 
 /* ---------------- helpers ---------------- */
@@ -332,22 +331,7 @@ $("#btn-close-day-detail").addEventListener("click", () => {
 
 /* ---------------- workout tab ---------------- */
 
-const DEFAULT_REST_SECONDS = 90;
-
 let equipmentCache = [];
-let restTimer = null;
-
-function initRestTimer() {
-  restTimer = new RestTimer({
-    onTick: (remaining, total) => {
-      $("#timer-display").textContent = RestTimer.formatTime(remaining);
-    },
-    onComplete: () => {
-      $("#btn-timer-toggle").textContent = "시작";
-      showToast("쉬는시간 종료!");
-    },
-  });
-}
 
 async function populateEquipmentSelect() {
   equipmentCache = await db.getEquipmentList();
@@ -359,11 +343,6 @@ async function populateEquipmentSelect() {
 
 async function renderWorkoutTab() {
   await populateEquipmentSelect();
-  if (!restTimer) initRestTimer();
-  if (!restTimer.active) {
-    restTimer.setDuration(DEFAULT_REST_SECONDS);
-  }
-  $("#timer-display").textContent = RestTimer.formatTime(restTimer.remaining);
 
   const logs = await db.getWorkoutLogsByDate(todayStr());
   await renderWorkoutLogList(logs);
@@ -422,45 +401,6 @@ async function renderMaxWeightChart() {
   );
 }
 
-async function renderWeeklyVolumeChart() {
-  const allLogs = await db.getAllWorkoutLogs();
-  const weightLogs = allLogs.filter((l) => l.type === "weight");
-
-  const volumeByWeek = new Map();
-  for (const log of weightLogs) {
-    const logDate = new Date(`${log.date}T00:00:00`);
-    const weekStart = new Date(logDate);
-    weekStart.setDate(logDate.getDate() - logDate.getDay());
-    const weekKey = formatDate(weekStart);
-
-    let logVolume = 0;
-    for (const set of log.sets) {
-      if (set.unit === "none") continue;
-      logVolume += toKg(set) * set.reps;
-    }
-    volumeByWeek.set(weekKey, (volumeByWeek.get(weekKey) || 0) + logVolume);
-  }
-
-  const now = new Date();
-  const currentWeekStart = new Date(now);
-  currentWeekStart.setDate(now.getDate() - now.getDay());
-
-  const weeks = [];
-  for (let i = 7; i >= 0; i--) {
-    const ws = new Date(currentWeekStart);
-    ws.setDate(currentWeekStart.getDate() - i * 7);
-    const key = formatDate(ws);
-    weeks.push({ label: `${ws.getMonth() + 1}/${ws.getDate()}`, volume: volumeByWeek.get(key) || 0 });
-  }
-
-  drawBarChart(
-    $("#chart-weekly-volume"),
-    weeks.map((w) => w.label),
-    weeks.map((w) => Math.round(w.volume)),
-    { color: "#00e5a0", unit: "kg" }
-  );
-}
-
 /* estimated calories: strength training uses total volume(kg) x 0.05 x (body weight / 70),
    running uses MET x body weight(kg) x time(hours), with MET derived from pace(분/km) */
 const CALORIES_PER_KG_VOLUME = 0.05;
@@ -497,6 +437,46 @@ function calcRunningCalories(log, bodyWeightKg) {
   return met * bodyWeightKg * hours;
 }
 
+function calcLogCalories(log, bodyWeightKg) {
+  if (log.type === "weight") return calcCaloriesFromVolume(calcLogVolume(log), bodyWeightKg);
+  if (log.type === "running") return calcRunningCalories(log, bodyWeightKg);
+  return 0;
+}
+
+async function renderWeeklyCalorieChart() {
+  const allLogs = await db.getAllWorkoutLogs();
+  const bodyWeightKg = await getLatestBodyWeightKg();
+
+  const caloriesByWeek = new Map();
+  for (const log of allLogs) {
+    const logDate = new Date(`${log.date}T00:00:00`);
+    const weekStart = new Date(logDate);
+    weekStart.setDate(logDate.getDate() - logDate.getDay());
+    const weekKey = formatDate(weekStart);
+
+    caloriesByWeek.set(weekKey, (caloriesByWeek.get(weekKey) || 0) + calcLogCalories(log, bodyWeightKg));
+  }
+
+  const now = new Date();
+  const currentWeekStart = new Date(now);
+  currentWeekStart.setDate(now.getDate() - now.getDay());
+
+  const weeks = [];
+  for (let i = 7; i >= 0; i--) {
+    const ws = new Date(currentWeekStart);
+    ws.setDate(currentWeekStart.getDate() - i * 7);
+    const key = formatDate(ws);
+    weeks.push({ label: `${ws.getMonth() + 1}/${ws.getDate()}`, calories: caloriesByWeek.get(key) || 0 });
+  }
+
+  drawBarChart(
+    $("#chart-weekly-calories"),
+    weeks.map((w) => w.label),
+    weeks.map((w) => Math.round(w.calories)),
+    { color: "#00e5a0", unit: "kcal" }
+  );
+}
+
 async function renderEquipmentLogTable() {
   const container = $("#equipment-log-table");
   const equipmentId = Number($("#stats-equipment-select").value);
@@ -521,13 +501,24 @@ async function renderEquipmentLogTable() {
     .map((log) => {
       const volume = calcLogVolume(log);
       const calories = calcCaloriesFromVolume(volume, bodyWeightKg);
-      return `
-        <tr>
-          <td>${log.date}</td>
-          <td>${formatSetsSummary(log.sets)}</td>
-          <td>${Math.round(volume)}kg</td>
-          <td>${Math.round(calories)}kcal</td>
-        </tr>`;
+      const setCount = log.sets.length;
+      return log.sets
+        .map((set, i) => {
+          if (i === 0) {
+            return `
+              <tr>
+                <td rowspan="${setCount}">${log.date}</td>
+                <td>세트${i + 1}: ${formatSet(set)}</td>
+                <td rowspan="${setCount}">${Math.round(volume)}kg</td>
+                <td rowspan="${setCount}">${Math.round(calories)}kcal</td>
+              </tr>`;
+          }
+          return `
+              <tr>
+                <td>세트${i + 1}: ${formatSet(set)}</td>
+              </tr>`;
+        })
+        .join("");
     })
     .join("");
 
@@ -544,7 +535,7 @@ async function renderWorkoutStats() {
   await populateStatsEquipmentSelect();
   await renderMaxWeightChart();
   await renderEquipmentLogTable();
-  await renderWeeklyVolumeChart();
+  await renderWeeklyCalorieChart();
 }
 
 $("#stats-equipment-select").addEventListener("change", () => {
@@ -745,9 +736,6 @@ $("#btn-finish-weight").addEventListener("click", async () => {
   await renderWorkoutLogList(logs);
   renderHomeWorkoutSummary(logs);
   showToast("운동이 기록되었어요");
-
-  $("#rest-timer-card").hidden = false;
-  restTimer.reset();
 });
 
 $("#running-distance").addEventListener("input", updateRunningPacePreview);
@@ -787,24 +775,6 @@ $("#form-running").addEventListener("submit", async (e) => {
   await renderWorkoutLogList(logs);
   renderHomeWorkoutSummary(logs);
   showToast("러닝이 기록되었어요");
-});
-
-/* rest timer controls */
-$("#btn-timer-toggle").addEventListener("click", () => {
-  const btn = $("#btn-timer-toggle");
-  if (restTimer.running) {
-    restTimer.pause();
-    btn.textContent = "시작";
-  } else {
-    restTimer.start();
-    btn.textContent = "일시정지";
-  }
-});
-$("#btn-timer-plus").addEventListener("click", () => restTimer.addSeconds(15));
-$("#btn-timer-minus").addEventListener("click", () => restTimer.addSeconds(-15));
-$("#btn-timer-reset").addEventListener("click", () => {
-  restTimer.reset(DEFAULT_REST_SECONDS);
-  $("#btn-timer-toggle").textContent = "시작";
 });
 
 /* ---------------- inbody tab ---------------- */
@@ -970,6 +940,33 @@ const DEFAULT_EQUIPMENT = [
 
 /* ---------------- settings tab ---------------- */
 
+function renderGoalSummary(goals) {
+  const parts = [];
+  if (goals?.targetWeight) parts.push(`체중 ${goals.targetWeight}kg`);
+  if (goals?.targetBodyFat) parts.push(`체지방률 ${goals.targetBodyFat}%`);
+  if (goals?.targetMuscleMass) parts.push(`골격근량 ${goals.targetMuscleMass}kg`);
+  $("#goal-summary").textContent = parts.length ? parts.join(" · ") : "아직 설정된 목표가 없어요.";
+}
+
+/* accordion: 목표 설정 폼 펼치기/접기 */
+const goalsFormCard = $("#goals-form-card");
+const btnToggleGoalsForm = $("#btn-toggle-goals-form");
+
+function openGoalsForm() {
+  goalsFormCard.hidden = false;
+  btnToggleGoalsForm.textContent = "닫기";
+}
+
+function closeGoalsForm() {
+  goalsFormCard.hidden = true;
+  btnToggleGoalsForm.textContent = "목표 설정 +";
+}
+
+btnToggleGoalsForm.addEventListener("click", () => {
+  if (goalsFormCard.hidden) openGoalsForm();
+  else closeGoalsForm();
+});
+
 async function renderSettingsTab() {
   const goals = await db.getSetting("fitnessGoals", {});
   $("#goal-current-weight").value = goals.currentWeight ?? "";
@@ -977,6 +974,7 @@ async function renderSettingsTab() {
   $("#goal-target-fat").value = goals.targetBodyFat ?? "";
   $("#goal-target-muscle").value = goals.targetMuscleMass ?? "";
   $("#goal-note").value = goals.note ?? "";
+  renderGoalSummary(goals);
 
   await renderEquipmentList();
 }
@@ -1179,6 +1177,8 @@ $("#goals-form").addEventListener("submit", async (e) => {
     note: $("#goal-note").value.trim(),
   };
   await db.setSetting("fitnessGoals", goals);
+  renderGoalSummary(goals);
+  closeGoalsForm();
   showToast("목표가 저장되었어요");
 });
 

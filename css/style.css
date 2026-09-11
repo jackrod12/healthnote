@@ -100,6 +100,25 @@ body {
 
 .section-header .card-title { margin: 0; }
 
+/* Info banner */
+.info-banner {
+  background: var(--mint-dim);
+  border: 1px solid var(--mint);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* Goal summary (below the accordion toggle button) */
+.goal-summary {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-dim);
+  padding: 2px 4px;
+}
+
 /* Buttons */
 .btn {
   border: none;

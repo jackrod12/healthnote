@@ -1,4 +1,4 @@
-const CACHE_NAME = "healthnote-cache-v2";
+const CACHE_NAME = "healthnote-cache-v3";
 
 const APP_SHELL = [
   "./",
@@ -7,7 +7,6 @@ const APP_SHELL = [
   "./css/style.css",
   "./js/app.js",
   "./js/db.js",
-  "./js/timer.js",
   "./js/chart.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

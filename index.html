@@ -87,17 +87,6 @@
       </div>
       <div id="workout-log-totals" class="workout-totals" hidden></div>
 
-      <div class="card" id="rest-timer-card" hidden>
-        <h2 class="card-title">쉬는시간</h2>
-        <div class="timer-display" id="timer-display">00:00</div>
-        <div class="timer-actions">
-          <button class="btn btn-ghost btn-sm" id="btn-timer-minus">-15s</button>
-          <button class="btn btn-primary btn-sm" id="btn-timer-toggle">시작</button>
-          <button class="btn btn-ghost btn-sm" id="btn-timer-plus">+15s</button>
-          <button class="btn btn-ghost btn-sm" id="btn-timer-reset">리셋</button>
-        </div>
-      </div>
-
       <div class="card">
         <h2 class="card-title">운동 통계</h2>
 
@@ -113,8 +102,8 @@
         </div>
 
         <div class="stats-block">
-          <h3 class="stats-subtitle">주간 운동 볼륨</h3>
-          <canvas id="chart-weekly-volume" width="380" height="200"></canvas>
+          <h3 class="stats-subtitle">주간 칼로리 소모</h3>
+          <canvas id="chart-weekly-calories" width="380" height="200"></canvas>
         </div>
       </div>
     </section>
@@ -157,7 +146,21 @@
 
     <!-- 설정 -->
     <section class="view" id="view-settings" data-view="settings" hidden>
+      <div class="info-banner">💾 데이터는 이 기기에만 저장됩니다. 설정에서 백업해두세요.</div>
+
       <div class="card">
+        <h2 class="card-title">데이터 관리</h2>
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" id="btn-export-data">데이터 내보내기</button>
+          <button type="button" class="btn" id="btn-import-data">데이터 가져오기</button>
+        </div>
+        <input type="file" id="import-file-input" accept="application/json" hidden />
+      </div>
+
+      <button type="button" class="btn btn-primary btn-block" id="btn-toggle-goals-form">목표 설정 +</button>
+      <div id="goal-summary" class="goal-summary"></div>
+
+      <div class="card" id="goals-form-card" hidden>
         <h2 class="card-title">내 목표</h2>
         <form id="goals-form" class="form-grid">
           <label>현재 체중(kg)<input type="number" step="0.1" id="goal-current-weight" /></label>
@@ -203,15 +206,6 @@
           <button type="button" class="btn btn-danger btn-sm" id="btn-delete-selected-equipment">선택 삭제</button>
         </div>
         <div id="equipment-list" class="summary-list"></div>
-      </div>
-
-      <div class="card">
-        <h2 class="card-title">데이터 관리</h2>
-        <div class="btn-row">
-          <button type="button" class="btn btn-primary" id="btn-export-data">데이터 내보내기</button>
-          <button type="button" class="btn" id="btn-import-data">데이터 가져오기</button>
-        </div>
-        <input type="file" id="import-file-input" accept="application/json" hidden />
       </div>
     </section>
 
