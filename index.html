@@ -80,7 +80,15 @@
     <section class="view" id="view-workout" data-view="workout" hidden>
       <div class="section-header">
         <h2 class="card-title">오늘 운동 기록</h2>
-        <button class="btn btn-primary btn-sm" id="btn-add-workout">+ 운동 추가</button>
+        <div class="btn-row-inline">
+          <button class="btn btn-ghost btn-sm" id="btn-toggle-reorder-mode">순서 변경</button>
+          <button class="btn btn-primary btn-sm" id="btn-add-workout">+ 운동 추가</button>
+        </div>
+      </div>
+      <div class="reorder-toolbar" id="reorder-toolbar" hidden>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-reorder-up">▲ 위로</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-reorder-down">▼ 아래로</button>
+        <button type="button" class="btn btn-primary btn-sm" id="btn-reorder-done">완료</button>
       </div>
       <div id="workout-log-list" class="summary-list">
         <p class="empty-hint">오늘 기록된 운동이 없어요.</p>

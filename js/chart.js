@@ -15,6 +15,25 @@ function setupCanvasForDPR(canvas) {
 }
 
 /**
+ * Auto-computed y-axis range so the data sits well inside the plot area
+ * instead of touching the top/bottom edges.
+ */
+function computeAutoYRange(values) {
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  if (values.length === 1) {
+    const pad = Math.abs(dataMin) * 0.1 || 1;
+    return { min: dataMin - pad, max: dataMax + pad };
+  }
+  const range = dataMax - dataMin;
+  if (range === 0) {
+    return { min: dataMin - 5, max: dataMax + 5 };
+  }
+  const pad = range * 0.2;
+  return { min: dataMin - pad, max: dataMax + pad };
+}
+
+/**
  * Draws a simple line chart on a canvas.
  * @param {HTMLCanvasElement} canvas
  * @param {string[]} labels - x-axis labels (dates)
@@ -40,10 +59,9 @@ export function drawLineChart(canvas, labels, values, options = {}) {
   const plotW = width - padding.left - padding.right;
   const plotH = height - padding.top - padding.bottom;
 
-  const dataMin = Math.min(...values);
-  const dataMax = Math.max(...values);
-  const min = options.yMin !== undefined && options.yMin !== null ? options.yMin : dataMin;
-  const max = options.yMax !== undefined && options.yMax !== null ? options.yMax : dataMax;
+  const autoRange = computeAutoYRange(values);
+  const min = options.yMin !== undefined && options.yMin !== null ? options.yMin : autoRange.min;
+  const max = options.yMax !== undefined && options.yMax !== null ? options.yMax : autoRange.max;
   const range = max - min || 1;
   const yFor = (v) => padding.top + plotH - ((v - min) / range) * plotH;
   const xFor = (i) =>
@@ -93,11 +111,19 @@ export function drawLineChart(canvas, labels, values, options = {}) {
     ctx.fill();
   });
 
+  // shared thinning: at most 6 labels (point values and dates alike), always
+  // keeping the first and last, so a long series doesn't turn into a smear
+  const n = values.length;
+  const maxLabels = 6;
+  const step = Math.max(1, Math.ceil((n - 1) / (maxLabels - 1)) || 1);
+  const isShownIndex = (i) => i === 0 || i === n - 1 || i % step === 0;
+
   // per-point value labels, sitting 8px above each point
   const roundTo1 = (v) => Math.round(v * 10) / 10;
   ctx.fillStyle = MINT;
   ctx.font = "11px system-ui";
   values.forEach((v, i) => {
+    if (!isShownIndex(i)) return;
     const x = xFor(i);
     const y = yFor(v);
     if (i === 0) ctx.textAlign = "left";
@@ -106,15 +132,19 @@ export function drawLineChart(canvas, labels, values, options = {}) {
     ctx.fillText(`${roundTo1(v)}${unit}`, x, y - 8);
   });
 
-  // first/last date labels
+  // date labels: only under actual data points, thinned to at most 6 when
+  // there are many, but the first and last are always shown
   if (labels && labels.length) {
     ctx.fillStyle = TEXT_DIM;
     ctx.font = "13px system-ui";
     const labelY = padding.top + plotH + 16;
-    ctx.textAlign = "left";
-    ctx.fillText(labels[0], padding.left, labelY);
-    ctx.textAlign = "right";
-    ctx.fillText(labels[labels.length - 1], width - padding.right, labelY);
+    labels.forEach((label, i) => {
+      if (!isShownIndex(i)) return;
+      if (i === 0) ctx.textAlign = "left";
+      else if (i === n - 1) ctx.textAlign = "right";
+      else ctx.textAlign = "center";
+      ctx.fillText(label, xFor(i), labelY);
+    });
   }
 }
 

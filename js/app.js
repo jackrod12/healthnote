@@ -585,15 +585,68 @@ function sortWorkoutLogsForDisplay(logs) {
   return logs.slice().sort((a, b) => (b.sortOrder ?? b.id) - (a.sortOrder ?? a.id));
 }
 
-async function moveWorkoutLog(logs, logId, direction) {
-  const ordered = sortWorkoutLogsForDisplay(logs);
-  const idx = ordered.findIndex((l) => l.id === logId);
-  if (idx === -1) return;
-  const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-  if (targetIdx < 0 || targetIdx >= ordered.length) return;
-  [ordered[idx], ordered[targetIdx]] = [ordered[targetIdx], ordered[idx]];
-  await db.reorderWorkoutLogs(ordered.map((l) => l.id));
+/* a new log always goes to the very bottom of today's list */
+async function getBottomSortOrder() {
+  const todaysLogs = await db.getWorkoutLogsByDate(todayStr());
+  if (!todaysLogs.length) return 0;
+  const minKey = Math.min(...todaysLogs.map((l) => l.sortOrder ?? l.id));
+  return minKey - 1;
 }
+
+/* reorder mode: checkbox multi-select + "위로"/"아래로" buttons */
+let reorderModeActive = false;
+let reorderSelectedIds = new Set();
+
+function moveSelectedUp(ordered, selectedIds) {
+  const arr = ordered.slice();
+  for (let i = 1; i < arr.length; i++) {
+    if (selectedIds.has(arr[i].id) && !selectedIds.has(arr[i - 1].id)) {
+      [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]];
+    }
+  }
+  return arr;
+}
+
+function moveSelectedDown(ordered, selectedIds) {
+  const arr = ordered.slice();
+  for (let i = arr.length - 2; i >= 0; i--) {
+    if (selectedIds.has(arr[i].id) && !selectedIds.has(arr[i + 1].id)) {
+      [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
+    }
+  }
+  return arr;
+}
+
+function setReorderMode(active) {
+  reorderModeActive = active;
+  reorderSelectedIds = new Set();
+  $("#reorder-toolbar").hidden = !active;
+}
+
+$("#btn-toggle-reorder-mode").addEventListener("click", async () => {
+  setReorderMode(true);
+  const logs = await db.getWorkoutLogsByDate(todayStr());
+  await renderWorkoutLogList(logs);
+});
+
+$("#btn-reorder-done").addEventListener("click", async () => {
+  setReorderMode(false);
+  const logs = await db.getWorkoutLogsByDate(todayStr());
+  await renderWorkoutLogList(logs);
+});
+
+async function applyReorderMove(direction) {
+  if (!reorderSelectedIds.size) return;
+  const logs = await db.getWorkoutLogsByDate(todayStr());
+  const ordered = sortWorkoutLogsForDisplay(logs);
+  const moved = direction === "up" ? moveSelectedUp(ordered, reorderSelectedIds) : moveSelectedDown(ordered, reorderSelectedIds);
+  await db.reorderWorkoutLogs(moved.map((l) => l.id));
+  const refreshed = await db.getWorkoutLogsByDate(todayStr());
+  await renderWorkoutLogList(refreshed);
+}
+
+$("#btn-reorder-up").addEventListener("click", () => applyReorderMove("up"));
+$("#btn-reorder-down").addEventListener("click", () => applyReorderMove("down"));
 
 async function renderWorkoutLogList(logs) {
   const container = $("#workout-log-list");
@@ -610,7 +663,7 @@ async function renderWorkoutLogList(logs) {
 
   const ordered = sortWorkoutLogsForDisplay(logs);
 
-  ordered.forEach((log, index) => {
+  ordered.forEach((log) => {
       const div = document.createElement("div");
       div.className = "log-item";
       let mainHtml = "";
@@ -645,13 +698,13 @@ async function renderWorkoutLogList(logs) {
           </div>`;
       }
 
-      const isFirst = index === 0;
-      const isLast = index === ordered.length - 1;
+      const checkboxHtml = reorderModeActive
+        ? `<input type="checkbox" class="log-reorder-checkbox" data-id="${log.id}" ${reorderSelectedIds.has(log.id) ? "checked" : ""} />`
+        : "";
       div.innerHTML = `
+        ${checkboxHtml}
         ${mainHtml}
         <div class="log-item-actions">
-          <button type="button" class="icon-btn log-move-up" data-id="${log.id}" ${isFirst ? "disabled" : ""}>▲</button>
-          <button type="button" class="icon-btn log-move-down" data-id="${log.id}" ${isLast ? "disabled" : ""}>▼</button>
           <button type="button" class="log-delete" data-id="${log.id}">✕</button>
         </div>`;
       container.appendChild(div);
@@ -663,21 +716,11 @@ async function renderWorkoutLogList(logs) {
     <div>오늘 총 소모 칼로리: 약 ${Math.round(totalCalories)}kcal</div>
   `;
 
-  $$(".log-move-up", container).forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (btn.disabled) return;
-      await moveWorkoutLog(logs, Number(btn.dataset.id), "up");
-      const refreshed = await db.getWorkoutLogsByDate(todayStr());
-      await renderWorkoutLogList(refreshed);
-    });
-  });
-
-  $$(".log-move-down", container).forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (btn.disabled) return;
-      await moveWorkoutLog(logs, Number(btn.dataset.id), "down");
-      const refreshed = await db.getWorkoutLogsByDate(todayStr());
-      await renderWorkoutLogList(refreshed);
+  $$(".log-reorder-checkbox", container).forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = Number(cb.dataset.id);
+      if (cb.checked) reorderSelectedIds.add(id);
+      else reorderSelectedIds.delete(id);
     });
   });
 
@@ -889,6 +932,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
       level,
       duration,
       calories,
+      sortOrder: await getBottomSortOrder(),
       createdAt: Date.now(),
     };
     await db.addWorkoutLog(log);
@@ -912,6 +956,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
     equipmentName: equipment.name,
     category: equipment.category,
     sets: currentSets.map((s) => ({ ...s })),
+    sortOrder: await getBottomSortOrder(),
     createdAt: Date.now(),
   };
   await db.addWorkoutLog(log);
@@ -951,6 +996,7 @@ $("#form-running").addEventListener("submit", async (e) => {
     distance,
     duration,
     pace,
+    sortOrder: await getBottomSortOrder(),
     createdAt: Date.now(),
   };
   await db.addWorkoutLog(log);
@@ -977,20 +1023,6 @@ const INBODY_METRIC_LABELS = {
 let selectedInbodyMetric = "weight";
 let inbodyRecordsCache = [];
 
-/* metric -> fitnessGoals key, used for the chart's y-axis lower bound */
-const INBODY_METRIC_GOAL_KEYS = {
-  weight: "targetWeight",
-  bodyFat: "targetBodyFat",
-  muscleMass: "targetMuscleMass",
-};
-
-async function getInbodyMetricGoal(metric) {
-  const goalKey = INBODY_METRIC_GOAL_KEYS[metric];
-  if (!goalKey) return null;
-  const goals = await db.getSetting("fitnessGoals", null);
-  return goals?.[goalKey] ?? null;
-}
-
 async function renderInbodyChart() {
   const metric = selectedInbodyMetric;
   const unit = $(`.pill[data-metric="${metric}"]`, $("#inbody-metric-tabs")).dataset.unit;
@@ -1000,26 +1032,11 @@ async function renderInbodyChart() {
   const recent = withMetric.slice(-10);
   const values = recent.map((r) => r[metric]);
 
-  let yMin;
-  let yMax;
-  if (values.length) {
-    const dataMin = Math.min(...values);
-    const dataMax = Math.max(...values);
-    const goal = await getInbodyMetricGoal(metric);
-    const minBase = goal !== null && goal !== undefined ? Math.min(dataMin, goal) : dataMin;
-    yMin = minBase * 0.95;
-    yMax = dataMax * 1.05;
-    if (yMin === yMax) {
-      yMin -= 1;
-      yMax += 1;
-    }
-  }
-
   drawLineChart(
     $("#chart-inbody"),
     recent.map((r) => r.date.slice(5)),
     values,
-    { color: "#00e5a0", unit, yMin, yMax }
+    { color: "#00e5a0", unit }
   );
 }
 

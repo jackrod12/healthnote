@@ -750,6 +750,25 @@ input[type="range"] {
 }
 .btn-row .btn { flex: 1; }
 
+.btn-row-inline {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.reorder-toolbar {
+  display: flex;
+  gap: 8px;
+}
+.reorder-toolbar .btn { flex: 1; }
+
+.log-reorder-checkbox {
+  width: auto;
+  min-height: 0;
+  flex: none;
+  margin: 0;
+}
+
 .segmented {
   display: flex;
   background: var(--card-alt);
