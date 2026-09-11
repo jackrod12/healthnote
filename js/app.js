@@ -1160,15 +1160,31 @@ const INBODY_METRICS = ["weight", "muscleMass", "bodyFatMass", "bmi", "bodyFat"]
 
 let inbodyRecordsCache = [];
 
+/* min: floor(dataMin - margin), max: ceil(dataMax + margin), margin = max(range*0.2, 2);
+   a single point instead gets a flat ±5 (which the margin formula also produces when
+   range is 0, so this only special-cases the truly single-record case) */
+function computeInbodyYRange(values) {
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  if (values.length === 1) {
+    return { min: Math.floor(dataMin - 5), max: Math.ceil(dataMax + 5) };
+  }
+  const range = dataMax - dataMin;
+  const margin = Math.max(range * 0.2, 2);
+  return { min: Math.floor(dataMin - margin), max: Math.ceil(dataMax + margin) };
+}
+
 async function renderInbodyChart() {
   INBODY_METRICS.forEach((metric) => {
     const withMetric = inbodyRecordsCache.filter((r) => r[metric] !== null && r[metric] !== undefined);
     const recent = withMetric.slice(-10);
+    const values = recent.map((r) => r[metric]);
+    const yRange = values.length ? computeInbodyYRange(values) : {};
     drawLineChart(
       $(`#chart-inbody-${metric}`),
       recent.map((r) => r.date.slice(5)),
-      recent.map((r) => r[metric]),
-      { color: "#00e5a0", unit: INBODY_METRIC_UNITS[metric] }
+      values,
+      { color: "#00e5a0", unit: INBODY_METRIC_UNITS[metric], yAxisLabels: true, yMin: yRange.min, yMax: yRange.max }
     );
   });
 }
@@ -1356,9 +1372,19 @@ function renderEquipmentCategoryTabs() {
 
 async function renderEquipmentList() {
   settingsEquipmentCache = await db.getEquipmentList();
+  $("#equipment-list-toggle-label").textContent = `헬스장 기구 (${settingsEquipmentCache.length}개)`;
   renderEquipmentCategoryTabs();
   renderFilteredEquipmentItems();
 }
+
+/* accordion: 기구 리스트(카테고리 탭 + 목록) 펼치기/접기, 기본 접힘 */
+let equipmentListExpanded = false;
+
+$("#btn-toggle-equipment-list").addEventListener("click", () => {
+  equipmentListExpanded = !equipmentListExpanded;
+  $("#equipment-list-body").hidden = !equipmentListExpanded;
+  $("#equipment-list-toggle-arrow").textContent = equipmentListExpanded ? "▲" : "▼";
+});
 
 /* accordion: 기구 등록 폼 펼치기/접기 */
 const equipmentFormCard = $("#equipment-form-card");
