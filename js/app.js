@@ -1387,6 +1387,33 @@ $("#equipment-form").addEventListener("submit", async (e) => {
   showToast("기구가 추가되었어요");
 });
 
+/* app update: clear SW caches + re-register SW, never touches IndexedDB */
+$("#btn-app-update").addEventListener("click", async () => {
+  const btn = $("#btn-app-update");
+  btn.disabled = true;
+  btn.textContent = "업데이트 중...";
+
+  try {
+    if ("caches" in window) {
+      const cacheKeys = await caches.keys();
+      await Promise.all(cacheKeys.map((key) => caches.delete(key)));
+    }
+
+    if ("serviceWorker" in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((reg) => reg.unregister()));
+      await navigator.serviceWorker.register("sw.js").catch(() => {});
+    }
+  } catch (err) {
+    showToast("업데이트에 실패했어요");
+    btn.disabled = false;
+    btn.textContent = "🔄 최신 버전으로 업데이트";
+    return;
+  }
+
+  location.reload(true);
+});
+
 /* data backup / restore */
 $("#btn-export-data").addEventListener("click", async () => {
   try {
