@@ -149,20 +149,20 @@ export function drawLineChart(canvas, labels, values, options = {}) {
 }
 
 /**
- * Draws a simple bar chart on a canvas.
+ * Draws a multi-series line chart sharing one x-axis (dates) and one
+ * auto-scaled y-axis across all series. Series may have gaps (null/undefined
+ * values) for dates where that metric wasn't recorded.
  * @param {HTMLCanvasElement} canvas
- * @param {string[]} labels - x-axis labels
- * @param {number[]} values - y values
- * @param {{color?: string, unit?: string}} [options]
+ * @param {string[]} labels - x-axis labels (dates), shared by all series
+ * @param {{values: (number|null|undefined)[], color: string, unit?: string}[]} series
+ * @param {{yMin?: number, yMax?: number}} [options]
  */
-export function drawBarChart(canvas, labels, values, options = {}) {
-  const color = options.color || MINT;
-  const unit = options.unit || "";
+export function drawMultiLineChart(canvas, labels, series, options = {}) {
   const { ctx, width, height } = setupCanvasForDPR(canvas);
-
   ctx.clearRect(0, 0, width, height);
 
-  if (!values || values.length === 0 || values.every((v) => !v)) {
+  const allValues = series.flatMap((s) => s.values.filter((v) => v !== null && v !== undefined));
+  if (!allValues.length) {
     ctx.fillStyle = TEXT_DIM;
     ctx.font = "13px system-ui";
     ctx.textAlign = "center";
@@ -170,13 +170,17 @@ export function drawBarChart(canvas, labels, values, options = {}) {
     return;
   }
 
-  const padding = { top: 24, right: 14, bottom: 24, left: 14 };
+  const padding = { top: 16, right: 20, bottom: 22, left: 20 };
   const plotW = width - padding.left - padding.right;
   const plotH = height - padding.top - padding.bottom;
 
-  const max = Math.max(...values, 1);
-  const barGap = 8;
-  const barWidth = (plotW - barGap * (values.length - 1)) / values.length;
+  const autoRange = computeAutoYRange(allValues);
+  const min = options.yMin !== undefined && options.yMin !== null ? options.yMin : autoRange.min;
+  const max = options.yMax !== undefined && options.yMax !== null ? options.yMax : autoRange.max;
+  const range = max - min || 1;
+  const yFor = (v) => padding.top + plotH - ((v - min) / range) * plotH;
+  const n = labels.length;
+  const xFor = (i) => (n === 1 ? padding.left + plotW / 2 : padding.left + (i / (n - 1)) * plotW);
 
   // grid lines
   ctx.strokeStyle = GRID;
@@ -189,56 +193,54 @@ export function drawBarChart(canvas, labels, values, options = {}) {
     ctx.stroke();
   }
 
-  values.forEach((v, i) => {
-    const barHeight = Math.max(1, (v / max) * plotH);
-    const x = padding.left + i * (barWidth + barGap);
-    const y = padding.top + plotH - barHeight;
-    const r = Math.min(4, barWidth / 2);
-    ctx.fillStyle = color;
+  series.forEach((s) => {
+    // line path, breaking (not interpolating) across gaps
     ctx.beginPath();
-    ctx.moveTo(x, y + r);
-    ctx.arcTo(x, y, x + r, y, r);
-    ctx.lineTo(x + barWidth - r, y);
-    ctx.arcTo(x + barWidth, y, x + barWidth, y + r, r);
-    ctx.lineTo(x + barWidth, padding.top + plotH);
-    ctx.lineTo(x, padding.top + plotH);
-    ctx.closePath();
-    ctx.fill();
+    let penDown = false;
+    s.values.forEach((v, i) => {
+      if (v === null || v === undefined) {
+        penDown = false;
+        return;
+      }
+      const x = xFor(i);
+      const y = yFor(v);
+      if (!penDown) {
+        ctx.moveTo(x, y);
+        penDown = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+
+    // points
+    s.values.forEach((v, i) => {
+      if (v === null || v === undefined) return;
+      ctx.beginPath();
+      ctx.arc(xFor(i), yFor(v), 3, 0, Math.PI * 2);
+      ctx.fillStyle = s.color;
+      ctx.fill();
+    });
   });
 
-  // per-bar value labels: 11px white, inside near the top of tall bars,
-  // just above the bar when it is too short to fit the label inside
-  const LABEL_INSIDE_MIN_HEIGHT = 24;
-  ctx.font = "11px system-ui";
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#ffffff";
-  values.forEach((v, i) => {
-    if (!v) return;
-    const barHeight = Math.max(1, (v / max) * plotH);
-    const barTop = padding.top + plotH - barHeight;
-    const x = padding.left + i * (barWidth + barGap) + barWidth / 2;
-    const label = `${Math.round(v)}${unit}`;
-    if (barHeight >= LABEL_INSIDE_MIN_HEIGHT) {
-      ctx.textBaseline = "top";
-      ctx.fillText(label, x, barTop + 10);
-    } else {
-      ctx.textBaseline = "alphabetic";
-      ctx.fillText(label, x, barTop - 4);
-    }
-  });
-  ctx.textBaseline = "alphabetic";
-
-  // x labels (skip evenly if they would overlap at this font size; always keep the last one)
-  if (labels && labels.length) {
+  // date labels: only under actual data points, thinned to at most 6 when
+  // there are many, but the first and last are always shown
+  if (labels.length) {
+    ctx.fillStyle = TEXT_DIM;
     ctx.font = "13px system-ui";
-    ctx.textAlign = "center";
-    const slot = barWidth + barGap;
-    const maxLabelWidth = Math.max(...labels.map((l) => ctx.measureText(l).width));
-    const step = maxLabelWidth + 6 > slot ? Math.ceil((maxLabelWidth + 6) / slot) : 1;
+    const labelY = padding.top + plotH + 16;
+    const maxLabels = 6;
+    const step = Math.max(1, Math.ceil((n - 1) / (maxLabels - 1)) || 1);
     labels.forEach((label, i) => {
-      if (i % step !== 0 && i !== labels.length - 1) return;
-      const x = padding.left + i * slot + barWidth / 2;
-      ctx.fillText(label, x, height - 6);
+      const isEdge = i === 0 || i === n - 1;
+      if (!isEdge && i % step !== 0) return;
+      if (i === 0) ctx.textAlign = "left";
+      else if (i === n - 1) ctx.textAlign = "right";
+      else ctx.textAlign = "center";
+      ctx.fillText(label, xFor(i), labelY);
     });
   }
 }

@@ -1,5 +1,5 @@
 import * as db from "./db.js";
-import { drawLineChart, drawBarChart } from "./chart.js";
+import { drawLineChart, drawMultiLineChart } from "./chart.js";
 
 /* ---------------- helpers ---------------- */
 
@@ -65,6 +65,44 @@ async function renderHomeTab() {
   renderHomeWorkoutSummary(logs);
   await renderGoalProgress();
   await renderCalendar();
+  await renderHomeCalorieStats();
+}
+
+/* ---------------- home tab: calorie stats (일간/주간/월간) ---------------- */
+
+function getMondayOfWeek(date) {
+  const d = new Date(date);
+  const day = d.getDay(); // 0=Sun..6=Sat
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+async function renderHomeCalorieStats() {
+  const bodyWeightKg = await getLatestBodyWeightKg();
+  const now = new Date();
+  const todayString = formatDate(now);
+
+  const monday = getMondayOfWeek(now);
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEndExclusive = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+  const [todayLogs, weekLogs, monthLogs] = await Promise.all([
+    db.getWorkoutLogsByDate(todayString),
+    db.getWorkoutLogsBetween(formatDate(monday), formatDate(tomorrow)),
+    db.getWorkoutLogsBetween(formatDate(monthStart), formatDate(monthEndExclusive)),
+  ]);
+
+  const sumCalories = (logs) => logs.reduce((sum, log) => sum + calcLogCalories(log, bodyWeightKg), 0);
+
+  $("#home-calorie-stats").innerHTML = `
+    <div class="calorie-stat-item"><span>일간</span><span>${Math.round(sumCalories(todayLogs))}kcal</span></div>
+    <div class="calorie-stat-item"><span>주간</span><span>${Math.round(sumCalories(weekLogs))}kcal</span></div>
+    <div class="calorie-stat-item"><span>월간</span><span>${Math.round(sumCalories(monthLogs))}kcal</span></div>
+  `;
 }
 
 /* ---------------- home tab: goal progress ---------------- */
@@ -427,6 +465,36 @@ function calcCaloriesFromVolume(volume, bodyWeightKg) {
   return volume * CALORIES_PER_KG_VOLUME * (bodyWeightKg / DEFAULT_BODY_WEIGHT_KG);
 }
 
+/* bodyweight (unit: "none") sets: MET x body weight(kg) x (set count x 1분) / 60,
+   MET looked up by whether the equipment name contains a known exercise keyword */
+const BODYWEIGHT_MET_RULES = [
+  { keywords: ["레그레이즈", "레그 레이즈"], met: 3.5 },
+  { keywords: ["플랭크"], met: 3.0 },
+  { keywords: ["크런치", "싯업"], met: 3.8 },
+  { keywords: ["딥스"], met: 5.0 },
+  { keywords: ["풀업", "친업"], met: 6.0 },
+  { keywords: ["푸시업"], met: 3.8 },
+  { keywords: ["런지"], met: 4.0 },
+  { keywords: ["스쿼트"], met: 5.0 },
+];
+const DEFAULT_BODYWEIGHT_MET = 3.5;
+
+function getBodyweightMET(equipmentName) {
+  const rule = BODYWEIGHT_MET_RULES.find((r) => r.keywords.some((kw) => equipmentName.includes(kw)));
+  return rule ? rule.met : DEFAULT_BODYWEIGHT_MET;
+}
+
+function calcBodyweightSetsCalories(log, bodyWeightKg) {
+  const noneSetCount = log.sets.filter((s) => s.unit === "none").length;
+  if (!noneSetCount) return 0;
+  const met = getBodyweightMET(log.equipmentName);
+  return met * bodyWeightKg * ((noneSetCount * 1) / 60);
+}
+
+function calcWeightLogCalories(log, bodyWeightKg) {
+  return calcCaloriesFromVolume(calcLogVolume(log), bodyWeightKg) + calcBodyweightSetsCalories(log, bodyWeightKg);
+}
+
 async function getLatestBodyWeightKg() {
   const records = await db.getAllInbodyRecords();
   if (!records.length) return DEFAULT_BODY_WEIGHT_KG;
@@ -472,44 +540,10 @@ function calcStairmasterCalories(log, bodyWeightKg) {
 }
 
 function calcLogCalories(log, bodyWeightKg) {
-  if (log.type === "weight") return calcCaloriesFromVolume(calcLogVolume(log), bodyWeightKg);
+  if (log.type === "weight") return calcWeightLogCalories(log, bodyWeightKg);
   if (log.type === "running") return calcRunningCalories(log, bodyWeightKg);
   if (log.type === "stairmaster") return calcStairmasterCalories(log, bodyWeightKg);
   return 0;
-}
-
-async function renderWeeklyCalorieChart() {
-  const allLogs = await db.getAllWorkoutLogs();
-  const bodyWeightKg = await getLatestBodyWeightKg();
-
-  const caloriesByWeek = new Map();
-  for (const log of allLogs) {
-    const logDate = new Date(`${log.date}T00:00:00`);
-    const weekStart = new Date(logDate);
-    weekStart.setDate(logDate.getDate() - logDate.getDay());
-    const weekKey = formatDate(weekStart);
-
-    caloriesByWeek.set(weekKey, (caloriesByWeek.get(weekKey) || 0) + calcLogCalories(log, bodyWeightKg));
-  }
-
-  const now = new Date();
-  const currentWeekStart = new Date(now);
-  currentWeekStart.setDate(now.getDate() - now.getDay());
-
-  const weeks = [];
-  for (let i = 7; i >= 0; i--) {
-    const ws = new Date(currentWeekStart);
-    ws.setDate(currentWeekStart.getDate() - i * 7);
-    const key = formatDate(ws);
-    weeks.push({ label: `${ws.getMonth() + 1}/${ws.getDate()}`, calories: caloriesByWeek.get(key) || 0 });
-  }
-
-  drawBarChart(
-    $("#chart-weekly-calories"),
-    weeks.map((w) => w.label),
-    weeks.map((w) => Math.round(w.calories)),
-    { color: "#00e5a0", unit: "kcal" }
-  );
 }
 
 async function renderEquipmentLogTable() {
@@ -535,7 +569,7 @@ async function renderEquipmentLogTable() {
   const rows = logs
     .map((log) => {
       const volume = calcLogVolume(log);
-      const calories = calcCaloriesFromVolume(volume, bodyWeightKg);
+      const calories = calcWeightLogCalories(log, bodyWeightKg);
       const setCount = log.sets.length;
       return log.sets
         .map((set, i) => {
@@ -570,7 +604,6 @@ async function renderWorkoutStats() {
   await populateStatsEquipmentSelect();
   await renderMaxWeightChart();
   await renderEquipmentLogTable();
-  await renderWeeklyCalorieChart();
 }
 
 $("#stats-equipment-select").addEventListener("change", () => {
@@ -669,7 +702,7 @@ async function renderWorkoutLogList(logs) {
       let mainHtml = "";
       if (log.type === "weight") {
         const volume = calcLogVolume(log);
-        const calories = calcCaloriesFromVolume(volume, bodyWeightKg);
+        const calories = calcWeightLogCalories(log, bodyWeightKg);
         totalVolume += volume;
         totalCalories += calories;
         mainHtml = `
@@ -1020,31 +1053,60 @@ const INBODY_METRIC_LABELS = {
   inbodyScore: "인바디점수",
 };
 
-let selectedInbodyMetric = "weight";
+const INBODY_METRIC_ORDER = ["weight", "muscleMass", "bodyFatMass", "bmi", "bodyFat", "waistHipRatio", "visceralFat", "inbodyScore"];
+
+const INBODY_METRIC_COLORS = {
+  weight: "#00e5a0",
+  muscleMass: "#4aa3ff",
+  bodyFat: "#ff5c5c",
+  bmi: "#ffd54a",
+  bodyFatMass: "#ff9f40",
+  waistHipRatio: "#b388ff",
+  visceralFat: "#ff77a9",
+  inbodyScore: "#ffffff",
+};
+
+let selectedInbodyMetrics = new Set(["weight"]);
 let inbodyRecordsCache = [];
 
+function inbodyChartTitleFor(metrics) {
+  if (metrics.length === 1) return `${INBODY_METRIC_LABELS[metrics[0]]} 변화`;
+  return "인바디 변화";
+}
+
+function renderInbodyLegend(metrics) {
+  const container = $("#inbody-chart-legend");
+  container.innerHTML = metrics
+    .map(
+      (m) =>
+        `<span class="legend-item"><span class="legend-dot" style="background:${INBODY_METRIC_COLORS[m]}"></span>${INBODY_METRIC_LABELS[m]}</span>`
+    )
+    .join("");
+}
+
 async function renderInbodyChart() {
-  const metric = selectedInbodyMetric;
-  const unit = $(`.pill[data-metric="${metric}"]`, $("#inbody-metric-tabs")).dataset.unit;
-  $("#inbody-chart-title").textContent = `${INBODY_METRIC_LABELS[metric]} 변화`;
+  const metrics = INBODY_METRIC_ORDER.filter((m) => selectedInbodyMetrics.has(m));
+  $("#inbody-chart-title").textContent = inbodyChartTitleFor(metrics);
+  renderInbodyLegend(metrics);
 
-  const withMetric = inbodyRecordsCache.filter((r) => r[metric] !== null && r[metric] !== undefined);
-  const recent = withMetric.slice(-10);
-  const values = recent.map((r) => r[metric]);
+  const recent = inbodyRecordsCache.slice(-10);
+  const dateLabels = recent.map((r) => r.date.slice(5));
 
-  drawLineChart(
-    $("#chart-inbody"),
-    recent.map((r) => r.date.slice(5)),
-    values,
-    { color: "#00e5a0", unit }
-  );
+  const series = metrics.map((m) => ({
+    values: recent.map((r) => (r[m] !== null && r[m] !== undefined ? r[m] : null)),
+    color: INBODY_METRIC_COLORS[m],
+    unit: $(`.pill[data-metric="${m}"]`, $("#inbody-metric-tabs")).dataset.unit,
+  }));
+
+  drawMultiLineChart($("#chart-inbody"), dateLabels, series);
 }
 
 $$(".pill", $("#inbody-metric-tabs")).forEach((btn) => {
   btn.addEventListener("click", async () => {
-    $$(".pill", $("#inbody-metric-tabs")).forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    selectedInbodyMetric = btn.dataset.metric;
+    const metric = btn.dataset.metric;
+    if (selectedInbodyMetrics.has(metric)) selectedInbodyMetrics.delete(metric);
+    else selectedInbodyMetrics.add(metric);
+    btn.classList.toggle("active", selectedInbodyMetrics.has(metric));
     await renderInbodyChart();
   });
 });
