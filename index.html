@@ -187,12 +187,17 @@
           </label>
           <label>메모<input type="text" id="equipment-memo" placeholder="예: 창가 쪽, 최대 120kg" /></label>
           <div class="photo-field">
-            <button type="button" class="btn btn-ghost btn-block" id="btn-equipment-photo">📷 사진 추가</button>
-            <input type="file" id="equipment-photo-input" accept="image/*" capture="environment" hidden />
+            <div class="btn-row">
+              <button type="button" class="btn btn-ghost" id="btn-equipment-photo-camera">📷 카메라로 찍기</button>
+              <button type="button" class="btn btn-ghost" id="btn-equipment-photo-gallery">🖼️ 앨범에서 선택</button>
+            </div>
+            <input type="file" id="equipment-photo-camera-input" accept="image/*" capture="environment" hidden />
+            <input type="file" id="equipment-photo-gallery-input" accept="image/*" hidden />
             <img id="equipment-photo-preview" class="photo-preview" hidden />
           </div>
           <button type="submit" class="btn btn-primary btn-block">추가</button>
         </form>
+        <div class="pill-row" id="equipment-category-tabs"></div>
         <div class="equipment-list-actions">
           <label class="checkbox-label"><input type="checkbox" id="equipment-select-all" /> 전체 선택</label>
           <button type="button" class="btn btn-danger btn-sm" id="btn-delete-selected-equipment">선택 삭제</button>
@@ -300,8 +305,12 @@
       </label>
       <label>메모<input type="text" id="edit-equipment-memo" placeholder="예: 창가 쪽, 최대 120kg" /></label>
       <div class="photo-field">
-        <button type="button" class="btn btn-ghost btn-block" id="btn-edit-equipment-photo">📷 사진 변경</button>
-        <input type="file" id="edit-equipment-photo-input" accept="image/*" capture="environment" hidden />
+        <div class="btn-row">
+          <button type="button" class="btn btn-ghost" id="btn-edit-equipment-photo-camera">📷 카메라로 찍기</button>
+          <button type="button" class="btn btn-ghost" id="btn-edit-equipment-photo-gallery">🖼️ 앨범에서 선택</button>
+        </div>
+        <input type="file" id="edit-equipment-photo-camera-input" accept="image/*" capture="environment" hidden />
+        <input type="file" id="edit-equipment-photo-gallery-input" accept="image/*" hidden />
         <img id="edit-equipment-photo-preview" class="photo-preview" hidden />
       </div>
       <div class="modal-actions">

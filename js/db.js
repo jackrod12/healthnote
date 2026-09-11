@@ -1,16 +1,23 @@
 import { openDB } from "https://cdn.jsdelivr.net/npm/idb@8/+esm";
 
 const DB_NAME = "healthnote-db";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
-export const STORE_NAMES = ["settings", "equipment", "workoutLogs", "inbodyRecords", "drinkLog"];
+export const STORE_NAMES = ["settings", "equipment", "workoutLogs", "inbodyRecords", "drinkLog2"];
 
 let dbPromise = null;
 
+/*
+ * Migration policy: onupgradeneeded must never delete or clear an existing
+ * object store — only ever create new ones (each guarded by a
+ * contains() check so re-running an upgrade is a no-op). If a store's shape
+ * needs to change, create a new store under a new name and copy the old
+ * data into it; leave the old store in place untouched.
+ */
 function getDB() {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      async upgrade(db, oldVersion, _newVersion, transaction) {
+      async upgrade(db, _oldVersion, _newVersion, transaction) {
         if (!db.objectStoreNames.contains("settings")) {
           db.createObjectStore("settings", { keyPath: "key" });
         }
@@ -27,20 +34,19 @@ function getDB() {
           store.createIndex("date", "date");
         }
 
-        if (!db.objectStoreNames.contains("drinkLog")) {
-          const store = db.createObjectStore("drinkLog", { keyPath: "id", autoIncrement: true });
+        if (!db.objectStoreNames.contains("drinkLog2")) {
+          const store = db.createObjectStore("drinkLog2", { keyPath: "id", autoIncrement: true });
           store.createIndex("date", "date");
-        } else if (oldVersion < 3) {
-          // v2 schema stored one record per date (keyPath: "date"); migrate to
-          // an id-keyed store with a date index so multiple entries per date
-          // (e.g. drink + protein) can coexist.
-          const oldStore = transaction.objectStore("drinkLog");
-          const oldRecords = await oldStore.getAll();
-          db.deleteObjectStore("drinkLog");
-          const newStore = db.createObjectStore("drinkLog", { keyPath: "id", autoIncrement: true });
-          newStore.createIndex("date", "date");
-          for (const rec of oldRecords) {
-            newStore.add({ date: rec.date, type: rec.type });
+
+          // Earlier app versions used a store named "drinkLog" (either
+          // keyPath: "date", or later keyPath: "id"). Copy any existing
+          // entries into the new store without touching the old one.
+          if (db.objectStoreNames.contains("drinkLog")) {
+            const oldStore = transaction.objectStore("drinkLog");
+            const oldRecords = await oldStore.getAll();
+            for (const rec of oldRecords) {
+              store.add({ date: rec.date, type: rec.type });
+            }
           }
         }
       },
@@ -158,23 +164,23 @@ export async function getAllInbodyRecords() {
 /* ---------- drink log (alcohol + protein tracking; multiple entries per date) ---------- */
 export async function getDrinkLogsByDate(date) {
   const db = await getDB();
-  return db.getAllFromIndex("drinkLog", "date", date);
+  return db.getAllFromIndex("drinkLog2", "date", date);
 }
 
 export async function addDrinkLog(date, type) {
   const db = await getDB();
-  return db.add("drinkLog", { date, type });
+  return db.add("drinkLog2", { date, type });
 }
 
 export async function deleteDrinkLogById(id) {
   const db = await getDB();
-  await db.delete("drinkLog", id);
+  await db.delete("drinkLog2", id);
 }
 
 export async function getDrinkLogsBetween(startDateInclusive, endDateExclusive) {
   const db = await getDB();
   const range = IDBKeyRange.bound(startDateInclusive, endDateExclusive, false, true);
-  return db.getAllFromIndex("drinkLog", "date", range);
+  return db.getAllFromIndex("drinkLog2", "date", range);
 }
 
 /* ---------- backup / restore ---------- */

@@ -983,15 +983,62 @@ async function renderSettingsTab() {
 
 let settingsEquipmentCache = [];
 
+/* ---- category tabs for the equipment list ---- */
+const EQUIPMENT_CATEGORIES = ["가슴", "등", "하체", "어깨", "팔", "복근", "유산소"];
+let selectedEquipmentCategory = "all";
+
+function getFilteredEquipmentList() {
+  if (selectedEquipmentCategory === "all") return settingsEquipmentCache;
+  if (selectedEquipmentCategory === "기타") {
+    return settingsEquipmentCache.filter((eq) => !EQUIPMENT_CATEGORIES.includes(eq.category));
+  }
+  return settingsEquipmentCache.filter((eq) => eq.category === selectedEquipmentCategory);
+}
+
+function renderEquipmentCategoryTabs() {
+  const container = $("#equipment-category-tabs");
+  const counts = { all: settingsEquipmentCache.length, 기타: 0 };
+  EQUIPMENT_CATEGORIES.forEach((cat) => {
+    counts[cat] = 0;
+  });
+  settingsEquipmentCache.forEach((eq) => {
+    if (EQUIPMENT_CATEGORIES.includes(eq.category)) counts[eq.category]++;
+    else counts["기타"]++;
+  });
+
+  const tabs = [{ key: "all", label: "전체" }, ...EQUIPMENT_CATEGORIES.map((c) => ({ key: c, label: c })), { key: "기타", label: "기타" }];
+
+  container.innerHTML = tabs
+    .map(
+      (t) =>
+        `<button type="button" class="pill${selectedEquipmentCategory === t.key ? " active" : ""}" data-category="${t.key}">${t.label} ${counts[t.key]}</button>`
+    )
+    .join("");
+
+  $$(".pill", container).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      selectedEquipmentCategory = btn.dataset.category;
+      $$(".pill", container).forEach((b) => b.classList.toggle("active", b === btn));
+      renderFilteredEquipmentItems();
+    });
+  });
+}
+
 async function renderEquipmentList() {
   settingsEquipmentCache = await db.getEquipmentList();
+  renderEquipmentCategoryTabs();
+  renderFilteredEquipmentItems();
+}
+
+function renderFilteredEquipmentItems() {
   const container = $("#equipment-list");
-  if (!settingsEquipmentCache.length) {
+  const filtered = getFilteredEquipmentList();
+  if (!filtered.length) {
     container.innerHTML = `<p class="empty-hint">등록된 기구가 없어요.</p>`;
     return;
   }
   container.innerHTML = "";
-  settingsEquipmentCache.forEach((eq) => {
+  filtered.forEach((eq) => {
     const div = document.createElement("div");
     div.className = "log-item equipment-item";
     const thumb = eq.photo
@@ -1080,22 +1127,30 @@ function closeEditEquipmentModal() {
 
 $("#btn-cancel-edit-equipment").addEventListener("click", closeEditEquipmentModal);
 
-$("#btn-edit-equipment-photo").addEventListener("click", () => {
-  $("#edit-equipment-photo-input").click();
-});
-
-$("#edit-equipment-photo-input").addEventListener("change", (e) => {
-  const file = e.target.files[0];
+function readPhotoFile(file, onLoaded) {
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
-    pendingEditPhoto = reader.result;
-    const preview = $("#edit-equipment-photo-preview");
-    preview.src = reader.result;
-    preview.hidden = false;
-  };
+  reader.onload = () => onLoaded(reader.result);
   reader.readAsDataURL(file);
+}
+
+$("#btn-edit-equipment-photo-camera").addEventListener("click", () => {
+  $("#edit-equipment-photo-camera-input").click();
 });
+$("#btn-edit-equipment-photo-gallery").addEventListener("click", () => {
+  $("#edit-equipment-photo-gallery-input").click();
+});
+
+function onEditEquipmentPhotoSelected(e) {
+  readPhotoFile(e.target.files[0], (dataUrl) => {
+    pendingEditPhoto = dataUrl;
+    const preview = $("#edit-equipment-photo-preview");
+    preview.src = dataUrl;
+    preview.hidden = false;
+  });
+}
+$("#edit-equipment-photo-camera-input").addEventListener("change", onEditEquipmentPhotoSelected);
+$("#edit-equipment-photo-gallery-input").addEventListener("change", onEditEquipmentPhotoSelected);
 
 $("#form-edit-equipment").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -1129,22 +1184,23 @@ $("#goals-form").addEventListener("submit", async (e) => {
 
 let pendingAddPhoto = null;
 
-$("#btn-equipment-photo").addEventListener("click", () => {
-  $("#equipment-photo-input").click();
+$("#btn-equipment-photo-camera").addEventListener("click", () => {
+  $("#equipment-photo-camera-input").click();
+});
+$("#btn-equipment-photo-gallery").addEventListener("click", () => {
+  $("#equipment-photo-gallery-input").click();
 });
 
-$("#equipment-photo-input").addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    pendingAddPhoto = reader.result;
+function onEquipmentPhotoSelected(e) {
+  readPhotoFile(e.target.files[0], (dataUrl) => {
+    pendingAddPhoto = dataUrl;
     const preview = $("#equipment-photo-preview");
-    preview.src = reader.result;
+    preview.src = dataUrl;
     preview.hidden = false;
-  };
-  reader.readAsDataURL(file);
-});
+  });
+}
+$("#equipment-photo-camera-input").addEventListener("change", onEquipmentPhotoSelected);
+$("#equipment-photo-gallery-input").addEventListener("change", onEquipmentPhotoSelected);
 
 $("#equipment-form").addEventListener("submit", async (e) => {
   e.preventDefault();
