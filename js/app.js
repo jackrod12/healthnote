@@ -1,5 +1,5 @@
 import * as db from "./db.js";
-import { drawLineChart, drawMultiLineChart } from "./chart.js";
+import { drawLineChart } from "./chart.js";
 
 /* ---------------- helpers ---------------- */
 
@@ -792,8 +792,59 @@ async function updateWeightFormMode() {
   if (stairmaster) {
     stairmasterBodyWeightKg = await getLatestBodyWeightKg();
     updateStairmasterCaloriePreview();
+    $("#previous-record-info").hidden = true;
+    pendingPreviousRecordSets = null;
+  } else {
+    await updatePreviousRecordInfo();
   }
 }
+
+/* previous-record lookup: shows the most recent log for the selected equipment
+   and lets the user load its sets into the current entry in one tap */
+let pendingPreviousRecordSets = null;
+
+async function updatePreviousRecordInfo() {
+  const equipmentId = Number($("#weight-equipment").value);
+  const equipment = equipmentCache.find((eq) => eq.id === equipmentId);
+  const container = $("#previous-record-info");
+  if (!equipment) {
+    container.hidden = true;
+    pendingPreviousRecordSets = null;
+    return;
+  }
+
+  const allLogs = await db.getAllWorkoutLogs();
+  const matches = allLogs
+    .filter((l) => l.type === "weight" && (l.equipmentId === equipment.id || l.equipmentName === equipment.name))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id));
+  const mostRecent = matches[0];
+
+  if (!mostRecent) {
+    container.hidden = true;
+    pendingPreviousRecordSets = null;
+    return;
+  }
+
+  pendingPreviousRecordSets = mostRecent.sets;
+  $("#previous-record-date-value").textContent = mostRecent.date;
+  $("#previous-record-sets").innerHTML = mostRecent.sets
+    .map((s, i) => `<div>세트${i + 1}: ${formatSet(s)}</div>`)
+    .join("");
+  container.hidden = false;
+}
+
+function resetPreviousRecordInfo() {
+  $("#previous-record-info").hidden = true;
+  pendingPreviousRecordSets = null;
+}
+
+$("#btn-load-previous-record").addEventListener("click", () => {
+  if (!pendingPreviousRecordSets) return;
+  currentSets = pendingPreviousRecordSets.map((s) => ({ ...s }));
+  renderSetList();
+  updateEquipmentLock();
+  showToast("이전 기록을 불러왔어요");
+});
 
 function updateStairmasterCaloriePreview() {
   const level = Number($("#stairmaster-level").value);
@@ -841,13 +892,17 @@ function renderSetList() {
       </div>
       <div class="set-item-actions">
         <button type="button" class="btn btn-ghost btn-sm set-copy" data-index="${i}">복사</button>
+        <button type="button" class="icon-btn set-edit" data-index="${i}">✏️</button>
         <button type="button" class="log-delete" data-index="${i}">✕</button>
       </div>`;
     container.appendChild(div);
   });
   $$(".log-delete", container).forEach((btn) => {
     btn.addEventListener("click", () => {
-      currentSets.splice(Number(btn.dataset.index), 1);
+      const idx = Number(btn.dataset.index);
+      currentSets.splice(idx, 1);
+      if (editingSetIndex === idx) exitSetEditMode();
+      else if (editingSetIndex !== null && idx < editingSetIndex) editingSetIndex -= 1;
       renderSetList();
       updateEquipmentLock();
     });
@@ -857,10 +912,16 @@ function renderSetList() {
       copySetToEntry(currentSets[Number(btn.dataset.index)]);
     });
   });
+  $$(".set-edit", container).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      enterSetEditMode(Number(btn.dataset.index));
+    });
+  });
 }
 
 function copySetToEntry(set) {
   if (!set) return;
+  exitSetEditMode();
   $("#set-entry").hidden = false;
   currentSetUnit = set.unit;
   $$(".segmented-btn", $("#weight-unit-toggle")).forEach((b) => b.classList.toggle("active", b.dataset.unit === set.unit));
@@ -870,9 +931,40 @@ function copySetToEntry(set) {
   $("#set-reps").value = set.reps;
 }
 
+/* set edit mode: 기록 버튼 -> 수정 완료, 취소 버튼 노출 */
+let editingSetIndex = null;
+
+function enterSetEditMode(index) {
+  const set = currentSets[index];
+  if (!set) return;
+  editingSetIndex = index;
+  $("#set-entry").hidden = false;
+  currentSetUnit = set.unit;
+  $$(".segmented-btn", $("#weight-unit-toggle")).forEach((b) => b.classList.toggle("active", b.dataset.unit === set.unit));
+  const isNone = set.unit === "none";
+  $("#set-weight-label").hidden = isNone;
+  $("#set-weight").value = isNone ? "" : set.weight;
+  $("#set-reps").value = set.reps;
+  $("#btn-record-set").textContent = "수정 완료";
+  $("#btn-cancel-set-edit").hidden = false;
+}
+
+function exitSetEditMode() {
+  editingSetIndex = null;
+  $("#btn-record-set").textContent = "기록";
+  $("#btn-cancel-set-edit").hidden = true;
+}
+
+$("#btn-cancel-set-edit").addEventListener("click", () => {
+  exitSetEditMode();
+  $("#set-weight").value = "";
+  $("#set-reps").value = "";
+});
+
 function resetSetEntryState() {
   currentSets = [];
   currentSetUnit = "kg";
+  exitSetEditMode();
   $("#set-entry").hidden = true;
   $$(".segmented-btn", $("#weight-unit-toggle")).forEach((b) => b.classList.toggle("active", b.dataset.unit === "kg"));
   $("#set-weight-label").hidden = false;
@@ -888,6 +980,7 @@ function closeAddWorkoutModal() {
   $("#form-running").reset();
   $("#running-pace-preview").textContent = "-";
   resetStairmasterState();
+  resetPreviousRecordInfo();
 }
 
 $("#btn-cancel-weight").addEventListener("click", closeAddWorkoutModal);
@@ -932,7 +1025,12 @@ $("#btn-record-set").addEventListener("click", () => {
       return;
     }
   }
-  currentSets.push({ weight, unit: currentSetUnit, reps });
+  if (editingSetIndex !== null) {
+    currentSets[editingSetIndex] = { weight, unit: currentSetUnit, reps };
+    exitSetEditMode();
+  } else {
+    currentSets.push({ weight, unit: currentSetUnit, reps });
+  }
   renderSetList();
   updateEquipmentLock();
   $("#set-weight").value = "";
@@ -1048,68 +1146,32 @@ const INBODY_METRIC_LABELS = {
   bodyFatMass: "체지방량",
   bmi: "BMI",
   bodyFat: "체지방률",
-  waistHipRatio: "복부비만률",
-  visceralFat: "내장지방레벨",
-  inbodyScore: "인바디점수",
 };
 
-const INBODY_METRIC_ORDER = ["weight", "muscleMass", "bodyFatMass", "bmi", "bodyFat", "waistHipRatio", "visceralFat", "inbodyScore"];
-
-const INBODY_METRIC_COLORS = {
-  weight: "#00e5a0",
-  muscleMass: "#4aa3ff",
-  bodyFat: "#ff5c5c",
-  bmi: "#ffd54a",
-  bodyFatMass: "#ff9f40",
-  waistHipRatio: "#b388ff",
-  visceralFat: "#ff77a9",
-  inbodyScore: "#ffffff",
+const INBODY_METRIC_UNITS = {
+  weight: "kg",
+  muscleMass: "kg",
+  bodyFatMass: "kg",
+  bmi: "",
+  bodyFat: "%",
 };
 
-let selectedInbodyMetrics = new Set(["weight"]);
+const INBODY_METRICS = ["weight", "muscleMass", "bodyFatMass", "bmi", "bodyFat"];
+
 let inbodyRecordsCache = [];
 
-function inbodyChartTitleFor(metrics) {
-  if (metrics.length === 1) return `${INBODY_METRIC_LABELS[metrics[0]]} 변화`;
-  return "인바디 변화";
-}
-
-function renderInbodyLegend(metrics) {
-  const container = $("#inbody-chart-legend");
-  container.innerHTML = metrics
-    .map(
-      (m) =>
-        `<span class="legend-item"><span class="legend-dot" style="background:${INBODY_METRIC_COLORS[m]}"></span>${INBODY_METRIC_LABELS[m]}</span>`
-    )
-    .join("");
-}
-
 async function renderInbodyChart() {
-  const metrics = INBODY_METRIC_ORDER.filter((m) => selectedInbodyMetrics.has(m));
-  $("#inbody-chart-title").textContent = inbodyChartTitleFor(metrics);
-  renderInbodyLegend(metrics);
-
-  const recent = inbodyRecordsCache.slice(-10);
-  const dateLabels = recent.map((r) => r.date.slice(5));
-
-  const series = metrics.map((m) => ({
-    values: recent.map((r) => (r[m] !== null && r[m] !== undefined ? r[m] : null)),
-    color: INBODY_METRIC_COLORS[m],
-    unit: $(`.pill[data-metric="${m}"]`, $("#inbody-metric-tabs")).dataset.unit,
-  }));
-
-  drawMultiLineChart($("#chart-inbody"), dateLabels, series);
-}
-
-$$(".pill", $("#inbody-metric-tabs")).forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const metric = btn.dataset.metric;
-    if (selectedInbodyMetrics.has(metric)) selectedInbodyMetrics.delete(metric);
-    else selectedInbodyMetrics.add(metric);
-    btn.classList.toggle("active", selectedInbodyMetrics.has(metric));
-    await renderInbodyChart();
+  INBODY_METRICS.forEach((metric) => {
+    const withMetric = inbodyRecordsCache.filter((r) => r[metric] !== null && r[metric] !== undefined);
+    const recent = withMetric.slice(-10);
+    drawLineChart(
+      $(`#chart-inbody-${metric}`),
+      recent.map((r) => r.date.slice(5)),
+      recent.map((r) => r[metric]),
+      { color: "#00e5a0", unit: INBODY_METRIC_UNITS[metric] }
+    );
   });
-});
+}
 
 async function renderInbodyTab() {
   if (!$("#inbody-date").value) $("#inbody-date").value = todayStr();
@@ -1149,9 +1211,6 @@ $("#inbody-form").addEventListener("submit", async (e) => {
     bodyFatMass: numOrNull($("#inbody-bodyfatmass").value),
     bmi: Number($("#inbody-bmi").value),
     bodyFat: Number($("#inbody-fat").value),
-    waistHipRatio: numOrNull($("#inbody-whr").value),
-    visceralFat: Number($("#inbody-visceral").value),
-    inbodyScore: numOrNull($("#inbody-score").value),
   };
   await db.addInbodyRecord(record);
   $("#inbody-form").reset();

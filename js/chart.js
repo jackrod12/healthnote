@@ -69,11 +69,12 @@ export function drawLineChart(canvas, labels, values, options = {}) {
       ? padding.left + plotW / 2
       : padding.left + (i / (values.length - 1)) * plotW;
 
-  // grid lines
+  // grid lines: 5 evenly spaced ticks
   ctx.strokeStyle = GRID;
   ctx.lineWidth = 1;
-  for (let i = 0; i <= 2; i++) {
-    const y = padding.top + (plotH / 2) * i;
+  const tickCount = 5;
+  for (let i = 0; i < tickCount; i++) {
+    const y = padding.top + (plotH / (tickCount - 1)) * i;
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
     ctx.lineTo(width - padding.right, y);
@@ -140,103 +141,6 @@ export function drawLineChart(canvas, labels, values, options = {}) {
     const labelY = padding.top + plotH + 16;
     labels.forEach((label, i) => {
       if (!isShownIndex(i)) return;
-      if (i === 0) ctx.textAlign = "left";
-      else if (i === n - 1) ctx.textAlign = "right";
-      else ctx.textAlign = "center";
-      ctx.fillText(label, xFor(i), labelY);
-    });
-  }
-}
-
-/**
- * Draws a multi-series line chart sharing one x-axis (dates) and one
- * auto-scaled y-axis across all series. Series may have gaps (null/undefined
- * values) for dates where that metric wasn't recorded.
- * @param {HTMLCanvasElement} canvas
- * @param {string[]} labels - x-axis labels (dates), shared by all series
- * @param {{values: (number|null|undefined)[], color: string, unit?: string}[]} series
- * @param {{yMin?: number, yMax?: number}} [options]
- */
-export function drawMultiLineChart(canvas, labels, series, options = {}) {
-  const { ctx, width, height } = setupCanvasForDPR(canvas);
-  ctx.clearRect(0, 0, width, height);
-
-  const allValues = series.flatMap((s) => s.values.filter((v) => v !== null && v !== undefined));
-  if (!allValues.length) {
-    ctx.fillStyle = TEXT_DIM;
-    ctx.font = "13px system-ui";
-    ctx.textAlign = "center";
-    ctx.fillText("데이터가 없어요", width / 2, height / 2);
-    return;
-  }
-
-  const padding = { top: 16, right: 20, bottom: 22, left: 20 };
-  const plotW = width - padding.left - padding.right;
-  const plotH = height - padding.top - padding.bottom;
-
-  const autoRange = computeAutoYRange(allValues);
-  const min = options.yMin !== undefined && options.yMin !== null ? options.yMin : autoRange.min;
-  const max = options.yMax !== undefined && options.yMax !== null ? options.yMax : autoRange.max;
-  const range = max - min || 1;
-  const yFor = (v) => padding.top + plotH - ((v - min) / range) * plotH;
-  const n = labels.length;
-  const xFor = (i) => (n === 1 ? padding.left + plotW / 2 : padding.left + (i / (n - 1)) * plotW);
-
-  // grid lines
-  ctx.strokeStyle = GRID;
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= 2; i++) {
-    const y = padding.top + (plotH / 2) * i;
-    ctx.beginPath();
-    ctx.moveTo(padding.left, y);
-    ctx.lineTo(width - padding.right, y);
-    ctx.stroke();
-  }
-
-  series.forEach((s) => {
-    // line path, breaking (not interpolating) across gaps
-    ctx.beginPath();
-    let penDown = false;
-    s.values.forEach((v, i) => {
-      if (v === null || v === undefined) {
-        penDown = false;
-        return;
-      }
-      const x = xFor(i);
-      const y = yFor(v);
-      if (!penDown) {
-        ctx.moveTo(x, y);
-        penDown = true;
-      } else {
-        ctx.lineTo(x, y);
-      }
-    });
-    ctx.strokeStyle = s.color;
-    ctx.lineWidth = 2.5;
-    ctx.lineJoin = "round";
-    ctx.stroke();
-
-    // points
-    s.values.forEach((v, i) => {
-      if (v === null || v === undefined) return;
-      ctx.beginPath();
-      ctx.arc(xFor(i), yFor(v), 3, 0, Math.PI * 2);
-      ctx.fillStyle = s.color;
-      ctx.fill();
-    });
-  });
-
-  // date labels: only under actual data points, thinned to at most 6 when
-  // there are many, but the first and last are always shown
-  if (labels.length) {
-    ctx.fillStyle = TEXT_DIM;
-    ctx.font = "13px system-ui";
-    const labelY = padding.top + plotH + 16;
-    const maxLabels = 6;
-    const step = Math.max(1, Math.ceil((n - 1) / (maxLabels - 1)) || 1);
-    labels.forEach((label, i) => {
-      const isEdge = i === 0 || i === n - 1;
-      if (!isEdge && i % step !== 0) return;
       if (i === 0) ctx.textAlign = "left";
       else if (i === n - 1) ctx.textAlign = "right";
       else ctx.textAlign = "center";

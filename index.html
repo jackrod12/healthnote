@@ -129,27 +129,29 @@
           <label>체지방량(kg)<input type="number" step="0.1" id="inbody-bodyfatmass" /></label>
           <label>BMI<input type="number" step="0.1" id="inbody-bmi" required /></label>
           <label>체지방률(%)<input type="number" step="0.1" id="inbody-fat" required /></label>
-          <label>복부비만률<input type="number" step="0.01" id="inbody-whr" /></label>
-          <label>내장지방레벨<input type="number" step="1" id="inbody-visceral" required /></label>
-          <label>인바디점수<input type="number" step="1" id="inbody-score" /></label>
           <button type="submit" class="btn btn-primary btn-block">기록 추가</button>
         </form>
       </div>
 
       <div class="card">
-        <h2 class="card-title" id="inbody-chart-title">체중 변화</h2>
-        <div class="pill-row" id="inbody-metric-tabs">
-          <button type="button" class="pill active" data-metric="weight" data-unit="kg">체중</button>
-          <button type="button" class="pill" data-metric="muscleMass" data-unit="kg">골격근량</button>
-          <button type="button" class="pill" data-metric="bodyFatMass" data-unit="kg">체지방량</button>
-          <button type="button" class="pill" data-metric="bmi" data-unit="">BMI</button>
-          <button type="button" class="pill" data-metric="bodyFat" data-unit="%">체지방률</button>
-          <button type="button" class="pill" data-metric="waistHipRatio" data-unit="">복부비만률</button>
-          <button type="button" class="pill" data-metric="visceralFat" data-unit="">내장지방레벨</button>
-          <button type="button" class="pill" data-metric="inbodyScore" data-unit="">인바디점수</button>
-        </div>
-        <div class="chart-legend" id="inbody-chart-legend"></div>
-        <canvas id="chart-inbody" width="380" height="200"></canvas>
+        <h2 class="card-title">체중 변화</h2>
+        <canvas id="chart-inbody-weight" class="mini-chart" width="380" height="180"></canvas>
+      </div>
+      <div class="card">
+        <h2 class="card-title">골격근량 변화</h2>
+        <canvas id="chart-inbody-muscleMass" class="mini-chart" width="380" height="180"></canvas>
+      </div>
+      <div class="card">
+        <h2 class="card-title">체지방량 변화</h2>
+        <canvas id="chart-inbody-bodyFatMass" class="mini-chart" width="380" height="180"></canvas>
+      </div>
+      <div class="card">
+        <h2 class="card-title">BMI 변화</h2>
+        <canvas id="chart-inbody-bmi" class="mini-chart" width="380" height="180"></canvas>
+      </div>
+      <div class="card">
+        <h2 class="card-title">체지방률 변화</h2>
+        <canvas id="chart-inbody-bodyFat" class="mini-chart" width="380" height="180"></canvas>
       </div>
     </section>
 
@@ -260,6 +262,12 @@
         <select id="weight-equipment"></select>
       </label>
 
+      <div id="previous-record-info" class="previous-record-info" hidden>
+        <div class="previous-record-date">📅 최근 기록: <span id="previous-record-date-value"></span></div>
+        <div class="previous-record-sets" id="previous-record-sets"></div>
+        <button type="button" class="btn btn-ghost btn-block btn-sm" id="btn-load-previous-record">이전 기록 불러오기</button>
+      </div>
+
       <div id="weight-set-section">
         <button type="button" class="btn btn-ghost btn-block" id="btn-add-set">+ 세트 추가</button>
 
@@ -271,7 +279,10 @@
           </div>
           <label id="set-weight-label">무게<input type="number" step="0.5" id="set-weight" /></label>
           <label>횟수<input type="number" id="set-reps" min="1" /></label>
-          <button type="button" class="btn btn-primary btn-block" id="btn-record-set">기록</button>
+          <div class="btn-row">
+            <button type="button" class="btn btn-ghost" id="btn-cancel-set-edit" hidden>취소</button>
+            <button type="button" class="btn btn-primary" id="btn-record-set">기록</button>
+          </div>
         </div>
 
         <div id="set-list" class="summary-list"></div>
