@@ -866,6 +866,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
   const log = {
     date: todayStr(),
     type: "weight",
+    equipmentId: equipment.id,
     equipmentName: equipment.name,
     category: equipment.category,
     sets: currentSets.map((s) => ({ ...s })),
@@ -1332,6 +1333,9 @@ $("#form-edit-equipment").addEventListener("submit", async (e) => {
   const photo = pendingEditPhoto !== undefined ? pendingEditPhoto : existing?.photo ?? null;
 
   await db.updateEquipment(editingEquipmentId, { name, manufacturer, category, memo, photo });
+  if (existing) {
+    await db.renameEquipmentInWorkoutLogs(editingEquipmentId, existing.name, name);
+  }
   closeEditEquipmentModal();
   await renderEquipmentList();
   showToast("기구가 수정되었어요");

@@ -133,6 +133,28 @@ export async function getAllWorkoutLogs() {
   return db.getAll("workoutLogs");
 }
 
+/**
+ * Keeps workoutLogs in sync with an equipment rename: any weight log already
+ * linked by equipmentId gets its equipmentName updated, and any legacy log
+ * that predates equipmentId (matched by its old equipmentName instead) gets
+ * both equipmentId backfilled and equipmentName updated.
+ */
+export async function renameEquipmentInWorkoutLogs(equipmentId, oldName, newName) {
+  const db = await getDB();
+  const all = await db.getAll("workoutLogs");
+  const toUpdate = all.filter(
+    (log) =>
+      log.type === "weight" &&
+      (log.equipmentId === equipmentId || (log.equipmentId == null && log.equipmentName === oldName))
+  );
+  if (!toUpdate.length) return;
+  const tx = db.transaction("workoutLogs", "readwrite");
+  await Promise.all([
+    ...toUpdate.map((log) => tx.store.put({ ...log, equipmentId, equipmentName: newName })),
+    tx.done,
+  ]);
+}
+
 export async function getRecentWorkoutLogs(days = 7) {
   const db = await getDB();
   const all = await db.getAll("workoutLogs");
