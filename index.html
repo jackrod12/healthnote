@@ -77,12 +77,18 @@
           <button type="button" class="drink-toggle-btn drink-toggle-light" id="btn-toggle-light">🟡 반주</button>
           <button type="button" class="drink-toggle-btn drink-toggle-protein" id="btn-toggle-protein">🟣 프로틴</button>
         </div>
+        <div id="calendar-day-memo" class="day-memo" hidden></div>
         <div id="calendar-day-logs" class="summary-list"></div>
       </div>
     </section>
 
     <!-- 운동 -->
     <section class="view" id="view-workout" data-view="workout" hidden>
+      <div class="btn-row">
+        <button type="button" class="btn btn-ghost" id="btn-save-routine">⭐ 루틴 저장</button>
+        <button type="button" class="btn btn-ghost" id="btn-load-routine">📋 루틴 불러오기</button>
+      </div>
+
       <div class="section-header">
         <h2 class="card-title">오늘 운동 기록</h2>
         <div class="btn-row-inline">
@@ -99,6 +105,14 @@
         <p class="empty-hint">오늘 기록된 운동이 없어요.</p>
       </div>
       <div id="workout-log-totals" class="workout-totals" hidden></div>
+
+      <div class="card">
+        <h2 class="card-title">오늘 메모</h2>
+        <div class="form-grid">
+          <input type="text" id="workout-memo-input" placeholder="오늘 컨디션, 특이사항 등..." />
+          <button type="button" class="btn btn-primary btn-block" id="btn-save-workout-memo">저장</button>
+        </div>
+      </div>
 
       <div class="card">
         <h2 class="card-title">운동 통계</h2>
@@ -359,6 +373,35 @@
         <button type="submit" class="btn btn-primary">저장</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- 루틴 저장 모달 -->
+<div class="modal-overlay" id="modal-save-routine" hidden>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h2 class="card-title">루틴 저장</h2>
+    <form id="form-save-routine" class="form-grid">
+      <label>루틴 이름<input type="text" id="routine-name-input" placeholder="예: 가슴+삼두 루틴" required /></label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="btn-cancel-save-routine">취소</button>
+        <button type="submit" class="btn btn-primary">저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 루틴 불러오기 모달 -->
+<div class="modal-overlay" id="modal-load-routine" hidden>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h2 class="card-title">루틴 불러오기</h2>
+    <div id="routine-list" class="summary-list">
+      <p class="empty-hint">저장된 루틴이 없어요.</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost btn-block" id="btn-cancel-load-routine">닫기</button>
+    </div>
   </div>
 </div>
 

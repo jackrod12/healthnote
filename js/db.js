@@ -1,9 +1,9 @@
 import { openDB } from "https://cdn.jsdelivr.net/npm/idb@8/+esm";
 
 const DB_NAME = "healthnote-db";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
-export const STORE_NAMES = ["settings", "equipment", "workoutLogs", "inbodyRecords", "drinkLog2"];
+export const STORE_NAMES = ["settings", "equipment", "workoutLogs", "inbodyRecords", "drinkLog2", "workoutMemo", "routines"];
 
 let dbPromise = null;
 
@@ -48,6 +48,13 @@ function getDB() {
               store.add({ date: rec.date, type: rec.type });
             }
           }
+        }
+
+        if (!db.objectStoreNames.contains("workoutMemo")) {
+          db.createObjectStore("workoutMemo", { keyPath: "date" });
+        }
+        if (!db.objectStoreNames.contains("routines")) {
+          db.createObjectStore("routines", { keyPath: "id", autoIncrement: true });
         }
       },
     });
@@ -222,6 +229,34 @@ export async function getDrinkLogsBetween(startDateInclusive, endDateExclusive) 
   const db = await getDB();
   const range = IDBKeyRange.bound(startDateInclusive, endDateExclusive, false, true);
   return db.getAllFromIndex("drinkLog2", "date", range);
+}
+
+/* ---------- workout memo (one per date) ---------- */
+export async function getWorkoutMemo(date) {
+  const db = await getDB();
+  const row = await db.get("workoutMemo", date);
+  return row ? row.memo : "";
+}
+
+export async function setWorkoutMemo(date, memo) {
+  const db = await getDB();
+  await db.put("workoutMemo", { date, memo });
+}
+
+/* ---------- routines ---------- */
+export async function getRoutines() {
+  const db = await getDB();
+  return db.getAll("routines");
+}
+
+export async function addRoutine(routine) {
+  const db = await getDB();
+  return db.add("routines", routine);
+}
+
+export async function deleteRoutine(id) {
+  const db = await getDB();
+  await db.delete("routines", id);
 }
 
 /* ---------- backup / restore ---------- */

@@ -304,9 +304,18 @@ async function showDayDetail(dateString) {
   currentDetailDate = dateString;
   const logs = await db.getWorkoutLogsByDate(dateString);
   const drinkRecords = await db.getDrinkLogsByDate(dateString);
+  const memo = await db.getWorkoutMemo(dateString);
   $("#calendar-day-detail").hidden = false;
   $("#calendar-day-title").textContent = `${dateString} 운동 내역`;
   updateDrinkToggleButtons(drinkRecords);
+
+  const memoEl = $("#calendar-day-memo");
+  if (memo) {
+    memoEl.textContent = `📝 ${memo}`;
+    memoEl.hidden = false;
+  } else {
+    memoEl.hidden = true;
+  }
 
   const container = $("#calendar-day-logs");
   if (!logs.length) {
@@ -396,7 +405,15 @@ async function renderWorkoutTab() {
   await renderWorkoutLogList(logs);
 
   await renderWorkoutStats();
+
+  $("#workout-memo-input").value = await db.getWorkoutMemo(todayStr());
 }
+
+$("#btn-save-workout-memo").addEventListener("click", async () => {
+  const memo = $("#workout-memo-input").value.trim();
+  await db.setWorkoutMemo(todayStr(), memo);
+  showToast("메모가 저장되었어요");
+});
 
 /* ---------------- workout tab: stats charts ---------------- */
 
@@ -767,6 +784,119 @@ async function renderWorkoutLogList(logs) {
     });
   });
 }
+
+/* ---------------- routine favorites ---------------- */
+
+$("#btn-save-routine").addEventListener("click", async () => {
+  const logs = await db.getWorkoutLogsByDate(todayStr());
+  const weightLogs = logs.filter((l) => l.type === "weight");
+  if (!weightLogs.length) {
+    showToast("오늘 기록된 웨이트 운동이 없어요");
+    return;
+  }
+  $("#routine-name-input").value = "";
+  $("#modal-save-routine").hidden = false;
+});
+
+$("#btn-cancel-save-routine").addEventListener("click", () => {
+  $("#modal-save-routine").hidden = true;
+});
+
+$("#form-save-routine").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("#routine-name-input").value.trim();
+  if (!name) return;
+
+  const logs = await db.getWorkoutLogsByDate(todayStr());
+  const weightLogs = sortWorkoutLogsForDisplay(logs).filter((l) => l.type === "weight");
+  const exercises = weightLogs.map((l) => ({
+    equipmentId: l.equipmentId ?? null,
+    equipmentName: l.equipmentName,
+    category: l.category ?? "",
+    sets: l.sets.map((s) => ({ ...s })),
+  }));
+
+  await db.addRoutine({ name, exercises });
+  $("#modal-save-routine").hidden = true;
+  showToast("루틴이 저장되었어요");
+});
+
+async function renderRoutineList() {
+  const routines = await db.getRoutines();
+  const container = $("#routine-list");
+  if (!routines.length) {
+    container.innerHTML = `<p class="empty-hint">저장된 루틴이 없어요.</p>`;
+    return;
+  }
+  container.innerHTML = "";
+  routines.forEach((r) => {
+    const div = document.createElement("div");
+    div.className = "log-item";
+    const summary = r.exercises.map((ex) => ex.equipmentName).join(", ");
+    div.innerHTML = `
+      <div class="log-main">
+        <span class="log-title">${r.name}</span>
+        <span class="log-sub">${r.exercises.length}개 운동 · ${summary}</span>
+      </div>
+      <div class="set-item-actions">
+        <button type="button" class="btn btn-primary btn-sm routine-apply" data-id="${r.id}">불러오기</button>
+        <button type="button" class="log-delete routine-delete" data-id="${r.id}">✕</button>
+      </div>`;
+    container.appendChild(div);
+  });
+
+  $$(".routine-apply", container).forEach((btn) => {
+    btn.addEventListener("click", () => applyRoutine(Number(btn.dataset.id)));
+  });
+  $$(".routine-delete", container).forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("정말 삭제할까요?")) return;
+      await db.deleteRoutine(Number(btn.dataset.id));
+      await renderRoutineList();
+    });
+  });
+}
+
+async function applyRoutine(routineId) {
+  const routines = await db.getRoutines();
+  const routine = routines.find((r) => r.id === routineId);
+  if (!routine) return;
+
+  const currentEquipment = await db.getEquipmentList();
+
+  for (const ex of routine.exercises) {
+    const equipment = currentEquipment.find((eq) => eq.id === ex.equipmentId);
+    const equipmentName = equipment ? equipment.name : ex.equipmentName;
+    const category = equipment ? equipment.category : ex.category || "";
+    const sortOrder = await getBottomSortOrder();
+    const log = {
+      date: todayStr(),
+      type: "weight",
+      equipmentId: ex.equipmentId,
+      equipmentName,
+      category,
+      sets: ex.sets.map((s) => ({ ...s })),
+      sortOrder,
+      createdAt: Date.now(),
+    };
+    await db.addWorkoutLog(log);
+  }
+
+  $("#modal-load-routine").hidden = true;
+  const logs = await db.getWorkoutLogsByDate(todayStr());
+  await renderWorkoutLogList(logs);
+  renderHomeWorkoutSummary(logs);
+  showToast(`"${routine.name}" 루틴을 불러왔어요`);
+}
+
+$("#btn-load-routine").addEventListener("click", async () => {
+  await renderRoutineList();
+  $("#modal-load-routine").hidden = false;
+});
+
+$("#btn-cancel-load-routine").addEventListener("click", () => {
+  $("#modal-load-routine").hidden = true;
+});
 
 /* add workout modal */
 const modalAddWorkout = $("#modal-add-workout");

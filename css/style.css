@@ -691,6 +691,17 @@ input[type="range"] {
   white-space: normal;
 }
 
+/* Day memo (calendar day detail) */
+.day-memo {
+  background: var(--card-alt);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+}
+
 /* Drink toggle (calendar day detail) */
 .drink-toggle-row {
   display: flex;
