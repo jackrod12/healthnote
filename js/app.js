@@ -150,8 +150,10 @@ let calendarViewDate = new Date();
 calendarViewDate.setDate(1);
 
 function renderMonthActivityStats(monthLogs, monthDrinkLogs) {
-  const weightCount = monthLogs.filter((l) => l.type === "weight").length;
-  const runningCount = monthLogs.filter((l) => l.type === "running" || l.type === "stairmaster").length;
+  const weightCount = new Set(monthLogs.filter((l) => l.type === "weight").map((l) => l.date)).size;
+  const runningCount = new Set(
+    monthLogs.filter((l) => l.type === "running" || l.type === "stairmaster").map((l) => l.date)
+  ).size;
   const drinkCount = monthDrinkLogs.filter((d) => d.type === "drink" || d.type === "light").length;
   const proteinCount = monthDrinkLogs.filter((d) => d.type === "protein").length;
 
