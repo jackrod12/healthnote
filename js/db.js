@@ -231,6 +231,11 @@ export async function getDrinkLogsBetween(startDateInclusive, endDateExclusive) 
   return db.getAllFromIndex("drinkLog2", "date", range);
 }
 
+export async function getAllDrinkLogs() {
+  const db = await getDB();
+  return db.getAll("drinkLog2");
+}
+
 /* ---------- workout memo (one per date) ---------- */
 export async function getWorkoutMemo(date) {
   const db = await getDB();

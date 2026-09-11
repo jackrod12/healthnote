@@ -903,3 +903,93 @@ input[type="range"] {
 @media (min-width: 431px) {
   #app { box-shadow: 0 0 40px rgba(0,0,0,0.6); }
 }
+
+/* Badges */
+.badge-summary-count {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.badge-summary-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--card-alt);
+  overflow: hidden;
+}
+
+.badge-summary-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--mint), #ffd700);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.badge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  padding-bottom: 16px;
+}
+
+.badge-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  opacity: 0.65;
+}
+
+.badge-card.achieved {
+  opacity: 1;
+  border-color: var(--mint-dim);
+}
+
+.badge-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.badge-icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+.badge-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.badge-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.badge-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.badge-date {
+  font-size: 11px;
+  color: var(--mint);
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.badge-locked {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}

@@ -1,5 +1,6 @@
 import * as db from "./db.js";
 import { drawLineChart } from "./chart.js";
+import { evaluateAllBadges, renderBadgeIconSvg, BADGE_CATEGORIES } from "./badges.js";
 
 /* ---------------- helpers ---------------- */
 
@@ -38,7 +39,7 @@ function showToast(msg, ms = 2200) {
 
 /* ---------------- tab navigation ---------------- */
 
-const TAB_TITLES = { home: "홈", workout: "운동", inbody: "인바디", settings: "설정" };
+const TAB_TITLES = { home: "홈", workout: "운동", inbody: "인바디", badges: "배지", settings: "설정" };
 const LAST_TAB_KEY = "lastTab";
 
 function switchTab(target) {
@@ -51,6 +52,7 @@ function switchTab(target) {
   if (target === "inbody") renderInbodyTab();
   if (target === "workout") renderWorkoutTab();
   if (target === "home") renderHomeTab();
+  if (target === "badges") renderBadgesTab();
   if (target === "settings") renderSettingsTab();
 }
 
@@ -1364,6 +1366,88 @@ $("#inbody-form").addEventListener("submit", async (e) => {
   await renderInbodyTab();
   showToast("인바디 기록이 추가되었어요");
 });
+
+/* ---------------- badges tab ---------------- */
+
+let allBadgesCache = [];
+let selectedBadgeCategory = "all";
+
+function formatBadgeDate(dateStr) {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-");
+  return `${y}.${m}.${d}`;
+}
+
+function renderBadgeCategoryTabs() {
+  const container = $("#badge-category-tabs");
+  const counts = { all: allBadgesCache.length };
+  BADGE_CATEGORIES.forEach((c) => {
+    counts[c.key] = allBadgesCache.filter((b) => b.category === c.key).length;
+  });
+  const tabs = [{ key: "all", label: "전체" }, ...BADGE_CATEGORIES.map((c) => ({ key: c.key, label: c.label }))];
+  container.innerHTML = tabs
+    .map(
+      (t) =>
+        `<button type="button" class="pill${selectedBadgeCategory === t.key ? " active" : ""}" data-category="${t.key}">${t.label} ${counts[t.key]}</button>`
+    )
+    .join("");
+
+  $$(".pill", container).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      selectedBadgeCategory = btn.dataset.category;
+      $$(".pill", container).forEach((b) => b.classList.toggle("active", b === btn));
+      renderFilteredBadgeGrid();
+    });
+  });
+}
+
+function renderFilteredBadgeGrid() {
+  const grid = $("#badge-grid");
+  const categoryMeta = Object.fromEntries(BADGE_CATEGORIES.map((c) => [c.key, c]));
+  const filtered =
+    selectedBadgeCategory === "all" ? allBadgesCache : allBadgesCache.filter((b) => b.category === selectedBadgeCategory);
+
+  if (!filtered.length) {
+    grid.innerHTML = `<p class="empty-hint">뱃지가 없어요.</p>`;
+    return;
+  }
+
+  grid.innerHTML = filtered
+    .map((b) => {
+      const color = categoryMeta[b.category]?.color || "#FFD700";
+      const icon = renderBadgeIconSvg(b.icon, b.achieved, color);
+      const statusLine = b.achieved
+        ? `<span class="badge-date">🎉 ${formatBadgeDate(b.achievedDate)} 달성</span>`
+        : `<span class="badge-locked">🔒 미달성</span>`;
+      return `
+        <div class="badge-card${b.achieved ? " achieved" : ""}">
+          <div class="badge-icon">${icon}</div>
+          <div class="badge-info">
+            <div class="badge-name">${b.name}</div>
+            <div class="badge-desc">${b.description}</div>
+            ${statusLine}
+          </div>
+        </div>`;
+    })
+    .join("");
+}
+
+function renderBadgeSummary() {
+  const total = allBadgesCache.length;
+  const achieved = allBadgesCache.filter((b) => b.achieved).length;
+  const pct = total ? Math.round((achieved / total) * 100) : 0;
+  $("#badge-summary").innerHTML = `
+    <div class="badge-summary-count">${achieved} / ${total}개 달성</div>
+    <div class="badge-summary-bar"><div class="badge-summary-bar-fill" style="width:${pct}%"></div></div>
+  `;
+}
+
+async function renderBadgesTab() {
+  allBadgesCache = await evaluateAllBadges();
+  renderBadgeSummary();
+  renderBadgeCategoryTabs();
+  renderFilteredBadgeGrid();
+}
 
 /* default equipment seeded on first run (when equipment store is empty) */
 const DEFAULT_EQUIPMENT = [
