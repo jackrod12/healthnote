@@ -1,5 +1,4 @@
 import * as db from "./db.js";
-import { streamRoutineRecommendation, sanitizeApiKey } from "./gemini.js";
 import { RestTimer } from "./timer.js";
 import { drawLineChart, drawBarChart } from "./chart.js";
 
@@ -41,11 +40,15 @@ function showToast(msg, ms = 2200) {
 /* ---------------- tab navigation ---------------- */
 
 const TAB_TITLES = { home: "홈", workout: "운동", inbody: "인바디", settings: "설정" };
+const LAST_TAB_KEY = "lastTab";
 
 function switchTab(target) {
   $$(".view").forEach((v) => (v.hidden = v.dataset.view !== target));
   $$(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.target === target));
   $("#topbar-title").textContent = TAB_TITLES[target];
+  try {
+    localStorage.setItem(LAST_TAB_KEY, target);
+  } catch {}
   if (target === "inbody") renderInbodyTab();
   if (target === "workout") renderWorkoutTab();
   if (target === "home") renderHomeTab();
@@ -160,7 +163,29 @@ async function renderCalendar() {
 
   const monthStartStr = formatDate(firstDay);
   const monthEndExclusiveStr = formatDate(new Date(year, month + 1, 1));
-  const monthLogs = await db.getWorkoutLogsBetween(monthStartStr, monthEndExclusiveStr);
+  const [monthLogs, monthDrinkLogs] = await Promise.all([
+    db.getWorkoutLogsBetween(monthStartStr, monthEndExclusiveStr),
+    db.getDrinkLogsBetween(monthStartStr, monthEndExclusiveStr),
+  ]);
+
+  const dayInfo = new Map();
+  const dayInfoFor = (date) => {
+    let info = dayInfo.get(date);
+    if (!info) {
+      info = { weight: false, running: false, drink: null };
+      dayInfo.set(date, info);
+    }
+    return info;
+  };
+  monthLogs.forEach((l) => {
+    const info = dayInfoFor(l.date);
+    if (l.type === "weight") info.weight = true;
+    if (l.type === "running") info.running = true;
+  });
+  monthDrinkLogs.forEach((d) => {
+    dayInfoFor(d.date).drink = d.type;
+  });
+
   const datesWithLogs = new Set(monthLogs.map((l) => l.date));
 
   const grid = $("#calendar-grid");
@@ -175,11 +200,21 @@ async function renderCalendar() {
   const todayString = todayStr();
   for (let day = 1; day <= daysInMonth; day++) {
     const dateString = formatDate(new Date(year, month, day));
+    const info = dayInfo.get(dateString);
     const cell = document.createElement("div");
     cell.className = "calendar-cell" + (dateString === todayString ? " today" : "");
+
+    let dots = "";
+    if (info) {
+      if (info.weight) dots += '<span class="calendar-dot dot-weight"></span>';
+      if (info.running) dots += '<span class="calendar-dot dot-running"></span>';
+      if (info.drink === "drink") dots += '<span class="calendar-dot dot-drink"></span>';
+      if (info.drink === "light") dots += '<span class="calendar-dot dot-light"></span>';
+    }
+
     cell.innerHTML = `
       <span class="calendar-day-num">${day}</span>
-      ${datesWithLogs.has(dateString) ? '<span class="calendar-dot"></span>' : ""}
+      ${dots ? `<span class="calendar-dots">${dots}</span>` : ""}
     `;
     cell.addEventListener("click", () => showDayDetail(dateString));
     grid.appendChild(cell);
@@ -198,10 +233,21 @@ async function renderCalendar() {
   $("#calendar-stats").textContent = `이번 달 ${monthCount}회 운동 · 이번 주 ${weekCount}회 운동`;
 }
 
+let currentDetailDate = null;
+
+function updateDrinkToggleButtons(activeType) {
+  $("#btn-toggle-drink").classList.toggle("active", activeType === "drink");
+  $("#btn-toggle-light").classList.toggle("active", activeType === "light");
+}
+
 async function showDayDetail(dateString) {
+  currentDetailDate = dateString;
   const logs = await db.getWorkoutLogsByDate(dateString);
+  const drink = await db.getDrinkLog(dateString);
   $("#calendar-day-detail").hidden = false;
   $("#calendar-day-title").textContent = `${dateString} 운동 내역`;
+  updateDrinkToggleButtons(drink ? drink.type : null);
+
   const container = $("#calendar-day-logs");
   if (!logs.length) {
     container.innerHTML = `<p class="empty-hint">이 날은 기록된 운동이 없어요.</p>`;
@@ -227,6 +273,22 @@ async function showDayDetail(dateString) {
     container.appendChild(div);
   });
 }
+
+async function toggleDrinkType(type) {
+  if (!currentDetailDate) return;
+  const existing = await db.getDrinkLog(currentDetailDate);
+  if (existing && existing.type === type) {
+    await db.deleteDrinkLog(currentDetailDate);
+    updateDrinkToggleButtons(null);
+  } else {
+    await db.setDrinkLog(currentDetailDate, type);
+    updateDrinkToggleButtons(type);
+  }
+  await renderCalendar();
+}
+
+$("#btn-toggle-drink").addEventListener("click", () => toggleDrinkType("drink"));
+$("#btn-toggle-light").addEventListener("click", () => toggleDrinkType("light"));
 
 $("#btn-prev-month").addEventListener("click", () => {
   calendarViewDate.setMonth(calendarViewDate.getMonth() - 1);
@@ -279,70 +341,8 @@ async function renderWorkoutTab() {
   const logs = await db.getWorkoutLogsByDate(todayStr());
   renderWorkoutLogList(logs);
 
-  const prefs = await db.getSetting("weeklyRoutinePrefs", { gymDays: ["월", "수", "금"], runDays: ["화", "목"] });
-  gymDaySelection = new Set(prefs.gymDays || []);
-  runDaySelection = new Set(prefs.runDays || []);
-  applyDaySelectionToButtons("#gym-day-picker", gymDaySelection);
-  applyDaySelectionToButtons("#run-day-picker", runDaySelection);
-  updateDayConflictWarning();
-
-  renderStoredRoutine(await db.getSetting("weeklyRoutine", null));
-
   await renderWorkoutStats();
 }
-
-/* ---------------- workout tab: weekly routine day picker ---------------- */
-
-const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
-
-let gymDaySelection = new Set();
-let runDaySelection = new Set();
-
-function applyDaySelectionToButtons(containerSelector, daySet) {
-  $$(".day-btn", $(containerSelector)).forEach((btn) => {
-    btn.classList.toggle("active", daySet.has(btn.dataset.day));
-  });
-}
-
-function updateDayConflictWarning() {
-  const overlap = DAY_LABELS.filter((d) => gymDaySelection.has(d) && runDaySelection.has(d));
-  $$(".day-btn", $("#gym-day-picker")).forEach((btn) => {
-    btn.classList.toggle("conflict", overlap.includes(btn.dataset.day));
-  });
-  $$(".day-btn", $("#run-day-picker")).forEach((btn) => {
-    btn.classList.toggle("conflict", overlap.includes(btn.dataset.day));
-  });
-  $("#day-picker-warning").hidden = overlap.length === 0;
-}
-
-async function saveDaySelections() {
-  await db.setSetting("weeklyRoutinePrefs", {
-    gymDays: DAY_LABELS.filter((d) => gymDaySelection.has(d)),
-    runDays: DAY_LABELS.filter((d) => runDaySelection.has(d)),
-  });
-}
-
-$$(".day-btn", $("#gym-day-picker")).forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const day = btn.dataset.day;
-    if (gymDaySelection.has(day)) gymDaySelection.delete(day);
-    else gymDaySelection.add(day);
-    btn.classList.toggle("active", gymDaySelection.has(day));
-    updateDayConflictWarning();
-    await saveDaySelections();
-  });
-});
-
-$$(".day-btn", $("#run-day-picker")).forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const day = btn.dataset.day;
-    if (runDaySelection.has(day)) runDaySelection.delete(day);
-    else runDaySelection.add(day);
-    btn.classList.toggle("active", runDaySelection.has(day));
-    updateDayConflictWarning();
-    await saveDaySelections();
-  });
-});
 
 /* ---------------- workout tab: stats charts ---------------- */
 
@@ -434,39 +434,86 @@ async function renderWeeklyVolumeChart() {
   );
 }
 
+/* estimated calories for strength training: total volume(kg) x 0.05 */
+const CALORIES_PER_KG_VOLUME = 0.05;
+
+function calcLogVolume(log) {
+  if (log.type !== "weight") return 0;
+  return log.sets
+    .filter((s) => s.unit !== "none")
+    .reduce((sum, s) => sum + toKg(s) * s.reps, 0);
+}
+
+function calcCaloriesFromVolume(volume) {
+  return volume * CALORIES_PER_KG_VOLUME;
+}
+
+async function renderEquipmentLogTable() {
+  const container = $("#equipment-log-table");
+  const equipmentId = Number($("#stats-equipment-select").value);
+  const equipment = statsEquipmentCache.find((e) => e.id === equipmentId);
+  if (!equipment) {
+    container.innerHTML = `<p class="empty-hint">데이터가 없어요</p>`;
+    return;
+  }
+
+  const allLogs = await db.getAllWorkoutLogs();
+  const logs = allLogs
+    .filter((l) => l.type === "weight" && l.equipmentName === equipment.name)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  if (!logs.length) {
+    container.innerHTML = `<p class="empty-hint">이 기구의 운동 기록이 없어요.</p>`;
+    return;
+  }
+
+  const rows = logs
+    .map((log) => {
+      const volume = calcLogVolume(log);
+      const calories = calcCaloriesFromVolume(volume);
+      return `
+        <tr>
+          <td>${log.date}</td>
+          <td>${formatSetsSummary(log.sets)}</td>
+          <td>${Math.round(volume)}kg</td>
+          <td>${Math.round(calories)}kcal</td>
+        </tr>`;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <table class="log-table">
+      <thead>
+        <tr><th>날짜</th><th>세트</th><th>총 볼륨</th><th>추정 칼로리</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
 async function renderWorkoutStats() {
   await populateStatsEquipmentSelect();
   await renderMaxWeightChart();
+  await renderEquipmentLogTable();
   await renderWeeklyVolumeChart();
 }
 
-$("#stats-equipment-select").addEventListener("change", renderMaxWeightChart);
-
-function renderStoredRoutine(routine) {
-  const textEl = $("#routine-text");
-  const updatedEl = $("#routine-updated-at");
-  if (!routine || !routine.text) {
-    textEl.textContent = "아직 추천받은 루틴이 없어요. 위 버튼을 눌러 이번 주 루틴을 받아보세요.";
-    updatedEl.textContent = "";
-    return;
-  }
-  textEl.textContent = routine.text;
-  const updated = new Date(routine.generatedAt);
-  updatedEl.textContent = `마지막 업데이트: ${updated.toLocaleString("ko-KR", {
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })}`;
-}
+$("#stats-equipment-select").addEventListener("change", () => {
+  renderMaxWeightChart();
+  renderEquipmentLogTable();
+});
 
 function renderWorkoutLogList(logs) {
   const container = $("#workout-log-list");
+  const totalsEl = $("#workout-log-totals");
   if (!logs.length) {
     container.innerHTML = `<p class="empty-hint">오늘 기록된 운동이 없어요.</p>`;
+    totalsEl.hidden = true;
     return;
   }
   container.innerHTML = "";
+  let totalVolume = 0;
+  let totalCalories = 0;
+
   logs
     .slice()
     .sort((a, b) => b.id - a.id)
@@ -474,10 +521,15 @@ function renderWorkoutLogList(logs) {
       const div = document.createElement("div");
       div.className = "log-item";
       if (log.type === "weight") {
+        const volume = calcLogVolume(log);
+        const calories = calcCaloriesFromVolume(volume);
+        totalVolume += volume;
+        totalCalories += calories;
         div.innerHTML = `
           <div class="log-main">
             <span class="log-title">${log.equipmentName}</span>
             <span class="log-sub">${log.sets.length}세트 · ${formatSetsSummary(log.sets)}</span>
+            <span class="log-sub">볼륨 ${Math.round(volume)}kg · 칼로리 ${Math.round(calories)}kcal</span>
           </div>
           <button class="log-delete" data-id="${log.id}">✕</button>`;
       } else {
@@ -491,6 +543,9 @@ function renderWorkoutLogList(logs) {
       container.appendChild(div);
     });
 
+  totalsEl.hidden = false;
+  totalsEl.textContent = `오늘 총 볼륨 ${Math.round(totalVolume)}kg · 총 추정 칼로리 ${Math.round(totalCalories)}kcal`;
+
   $$(".log-delete", container).forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!confirm("정말 삭제할까요?")) return;
@@ -501,54 +556,6 @@ function renderWorkoutLogList(logs) {
     });
   });
 }
-
-/* AI weekly routine recommendation */
-$("#btn-recommend-routine").addEventListener("click", async () => {
-  const btn = $("#btn-recommend-routine");
-  const gymDays = DAY_LABELS.filter((d) => gymDaySelection.has(d));
-  const runDays = DAY_LABELS.filter((d) => runDaySelection.has(d));
-
-  if (!gymDays.length && !runDays.length) {
-    showToast("헬스장 또는 러닝 요일을 선택해주세요");
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = "추천 받는 중...";
-
-  const textEl = $("#routine-text");
-  const updatedEl = $("#routine-updated-at");
-  textEl.textContent = "";
-  updatedEl.textContent = "";
-
-  try {
-    const apiKey = await db.getSetting("geminiApiKey", "");
-    const equipmentList = await db.getEquipmentList();
-    const recentLogs = await db.getRecentWorkoutLogs(3);
-    const goals = await db.getSetting("fitnessGoals", null);
-    const inbodyRecords = await db.getAllInbodyRecords();
-    const latestInbody = inbodyRecords.length ? inbodyRecords[inbodyRecords.length - 1] : null;
-
-    const text = await streamRoutineRecommendation(
-      apiKey,
-      { equipmentList, recentLogs, goals, latestInbody, gymDays, runDays },
-      (_delta, fullTextSoFar) => {
-        textEl.textContent = fullTextSoFar;
-      }
-    );
-
-    const routine = { text, generatedAt: Date.now() };
-    await db.setSetting("weeklyRoutine", routine);
-    renderStoredRoutine(routine);
-    showToast("이번 주 루틴이 갱신되었어요");
-  } catch (err) {
-    showToast(err.message || "루틴 추천에 실패했어요.");
-    renderStoredRoutine(await db.getSetting("weeklyRoutine", null));
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "📅 이번 주 루틴 받기";
-  }
-});
 
 /* add workout modal */
 const modalAddWorkout = $("#modal-add-workout");
@@ -749,10 +756,13 @@ $("#btn-timer-reset").addEventListener("click", async () => {
 
 const INBODY_METRIC_LABELS = {
   weight: "체중",
-  bodyFat: "체지방률",
   muscleMass: "골격근량",
+  bodyFatMass: "체지방량",
   bmi: "BMI",
+  bodyFat: "체지방률",
+  waistHipRatio: "복부비만률",
   visceralFat: "내장지방레벨",
+  inbodyScore: "인바디점수",
 };
 
 let selectedInbodyMetric = "weight";
@@ -763,7 +773,8 @@ function renderInbodyChart() {
   const unit = $(`.pill[data-metric="${metric}"]`, $("#inbody-metric-tabs")).dataset.unit;
   $("#inbody-chart-title").textContent = `${INBODY_METRIC_LABELS[metric]} 변화`;
 
-  const recent = inbodyRecordsCache.slice(-10);
+  const withMetric = inbodyRecordsCache.filter((r) => r[metric] !== null && r[metric] !== undefined);
+  const recent = withMetric.slice(-10);
   drawLineChart(
     $("#chart-inbody"),
     recent.map((r) => r.date.slice(5)),
@@ -801,10 +812,12 @@ function renderInbodyList(records) {
     .forEach((r) => {
       const div = document.createElement("div");
       div.className = "log-item";
+      const fmt = (v, unit = "") => (v === null || v === undefined ? "-" : `${v}${unit}`);
       div.innerHTML = `
         <div class="log-main">
           <span class="log-title">${r.date}</span>
-          <span class="log-sub">체중 ${r.weight}kg · 체지방 ${r.bodyFat}% · 골격근 ${r.muscleMass}kg · BMI ${r.bmi} · 내장지방 ${r.visceralFat}</span>
+          <span class="log-sub">체중 ${fmt(r.weight, "kg")} · 골격근 ${fmt(r.muscleMass, "kg")} · 체지방량 ${fmt(r.bodyFatMass, "kg")} · BMI ${fmt(r.bmi)}</span>
+          <span class="log-sub">체지방률 ${fmt(r.bodyFat, "%")} · 복부비만률 ${fmt(r.waistHipRatio)} · 내장지방 ${fmt(r.visceralFat)} · 인바디점수 ${fmt(r.inbodyScore)}</span>
         </div>
         <button class="log-delete" data-id="${r.id}">✕</button>`;
       container.appendChild(div);
@@ -819,15 +832,22 @@ function renderInbodyList(records) {
   });
 }
 
+function numOrNull(value) {
+  return value === "" ? null : Number(value);
+}
+
 $("#inbody-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const record = {
     date: $("#inbody-date").value,
     weight: Number($("#inbody-weight").value),
-    bodyFat: Number($("#inbody-fat").value),
     muscleMass: Number($("#inbody-muscle").value),
+    bodyFatMass: numOrNull($("#inbody-bodyfatmass").value),
     bmi: Number($("#inbody-bmi").value),
+    bodyFat: Number($("#inbody-fat").value),
+    waistHipRatio: numOrNull($("#inbody-whr").value),
     visceralFat: Number($("#inbody-visceral").value),
+    inbodyScore: numOrNull($("#inbody-score").value),
   };
   await db.addInbodyRecord(record);
   $("#inbody-form").reset();
@@ -879,7 +899,6 @@ const DEFAULT_EQUIPMENT = [
 /* ---------------- settings tab ---------------- */
 
 async function renderSettingsTab() {
-  $("#gemini-api-key").value = await db.getSetting("geminiApiKey", "");
   $("#default-rest-seconds").value = await db.getSetting("defaultRestSeconds", 90);
 
   const goals = await db.getSetting("fitnessGoals", {});
@@ -1016,14 +1035,6 @@ $("#goals-form").addEventListener("submit", async (e) => {
   showToast("목표가 저장되었어요");
 });
 
-$("#api-key-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const key = sanitizeApiKey($("#gemini-api-key").value);
-  await db.setSetting("geminiApiKey", key);
-  $("#gemini-api-key").value = key;
-  showToast("API 키가 저장되었어요");
-});
-
 $("#rest-time-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const seconds = Number($("#default-rest-seconds").value) || 90;
@@ -1126,10 +1137,22 @@ function initTopbarDate() {
   });
 }
 
+function getLastTab() {
+  try {
+    const saved = localStorage.getItem(LAST_TAB_KEY);
+    return saved && TAB_TITLES[saved] ? saved : "home";
+  } catch {
+    return "home";
+  }
+}
+
 async function init() {
   initTopbarDate();
   await db.seedDefaultEquipmentIfEmpty(DEFAULT_EQUIPMENT);
-  await renderHomeTab();
+  await db.deleteSetting("weeklyRoutinePrefs");
+  await db.deleteSetting("weeklyRoutine");
+
+  switchTab(getLastTab());
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});

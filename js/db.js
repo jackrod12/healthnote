@@ -1,9 +1,9 @@
 import { openDB } from "https://cdn.jsdelivr.net/npm/idb@8/+esm";
 
 const DB_NAME = "healthnote-db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
-export const STORE_NAMES = ["settings", "equipment", "workoutLogs", "inbodyRecords"];
+export const STORE_NAMES = ["settings", "equipment", "workoutLogs", "inbodyRecords", "drinkLog"];
 
 let dbPromise = null;
 
@@ -26,6 +26,9 @@ function getDB() {
           const store = db.createObjectStore("inbodyRecords", { keyPath: "id", autoIncrement: true });
           store.createIndex("date", "date");
         }
+        if (!db.objectStoreNames.contains("drinkLog")) {
+          db.createObjectStore("drinkLog", { keyPath: "date" });
+        }
       },
     });
   }
@@ -42,6 +45,11 @@ export async function getSetting(key, fallback = null) {
 export async function setSetting(key, value) {
   const db = await getDB();
   await db.put("settings", { key, value });
+}
+
+export async function deleteSetting(key) {
+  const db = await getDB();
+  await db.delete("settings", key);
 }
 
 /* ---------- equipment ---------- */
@@ -131,6 +139,28 @@ export async function getAllInbodyRecords() {
   const db = await getDB();
   const all = await db.getAll("inbodyRecords");
   return all.sort((a, b) => (a.date > b.date ? 1 : -1));
+}
+
+/* ---------- drink log ---------- */
+export async function getDrinkLog(date) {
+  const db = await getDB();
+  return db.get("drinkLog", date);
+}
+
+export async function setDrinkLog(date, type) {
+  const db = await getDB();
+  await db.put("drinkLog", { date, type });
+}
+
+export async function deleteDrinkLog(date) {
+  const db = await getDB();
+  await db.delete("drinkLog", date);
+}
+
+export async function getDrinkLogsBetween(startDateInclusive, endDateExclusive) {
+  const db = await getDB();
+  const range = IDBKeyRange.bound(startDateInclusive, endDateExclusive, false, true);
+  return db.getAll("drinkLog", range);
 }
 
 /* ---------- backup / restore ---------- */

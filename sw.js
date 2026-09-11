@@ -1,4 +1,4 @@
-const CACHE_NAME = "healthnote-cache-v1";
+const CACHE_NAME = "healthnote-cache-v2";
 
 const APP_SHELL = [
   "./",
@@ -7,7 +7,6 @@ const APP_SHELL = [
   "./css/style.css",
   "./js/app.js",
   "./js/db.js",
-  "./js/gemini.js",
   "./js/timer.js",
   "./js/chart.js",
   "./icons/icon-192.png",
@@ -38,7 +37,7 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url);
 
-  // Never intercept cross-origin calls (Gemini API, idb CDN module, etc.)
+  // Never intercept cross-origin calls (idb CDN module, etc.)
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(

@@ -118,12 +118,6 @@ body {
   color: #08251a;
 }
 
-.btn-ai {
-  background: linear-gradient(135deg, var(--mint), #00b386);
-  color: #06201a;
-  font-size: 16px;
-}
-
 .btn-ghost {
   background: transparent;
   border: 1px solid var(--border);
@@ -193,12 +187,22 @@ body {
   font-weight: 700;
 }
 
+.calendar-dots {
+  display: flex;
+  gap: 2px;
+}
+
 .calendar-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
   background: var(--mint);
 }
+
+.dot-weight { background: var(--mint); }
+.dot-running { background: #4aa3ff; }
+.dot-drink { background: var(--danger); }
+.dot-light { background: #ffd54a; }
 
 .calendar-stats {
   margin-top: 12px;
@@ -268,45 +272,6 @@ body {
   margin: 0 0 8px;
 }
 .stats-block select { margin-bottom: 10px; }
-
-/* Day picker (weekly routine gym/run day selection) */
-.day-picker-group {
-  margin-bottom: 14px;
-}
-.day-picker-label {
-  display: block;
-  font-size: 13px;
-  color: var(--text-dim);
-  margin-bottom: 8px;
-}
-.day-picker {
-  display: flex;
-  gap: 6px;
-}
-.day-btn {
-  flex: 1;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--card-alt);
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.day-btn.active {
-  background: var(--mint);
-  border-color: var(--mint);
-  color: #08251a;
-}
-.day-btn.conflict {
-  box-shadow: 0 0 0 2px var(--danger) inset;
-}
-.day-picker-warning {
-  color: var(--danger);
-  font-size: 12px;
-  margin: 0 0 14px;
-}
 
 /* Pill tabs (inbody chart metric selector) */
 .pill-row {
@@ -464,19 +429,63 @@ input:focus, select:focus {
   border: 1px solid var(--border);
 }
 
-/* Routine card */
-.routine-card { border: 1px solid var(--mint-dim); }
-.routine-text {
-  font-size: 14px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  color: var(--text);
+/* Workout totals */
+.workout-totals {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 4px 0 2px;
 }
 
-.routine-updated {
-  margin-top: 10px;
-  font-size: 11px;
+/* Equipment log table */
+#equipment-log-table {
+  overflow-x: auto;
+}
+.log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.log-table th, .log-table td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.log-table th {
   color: var(--text-dim);
+  font-weight: 600;
+}
+.log-table td:nth-child(2) {
+  white-space: normal;
+}
+
+/* Drink toggle (calendar day detail) */
+.drink-toggle-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.drink-toggle-btn {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: var(--card-alt);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.drink-toggle-btn.active.drink-toggle-drink {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #2a0505;
+}
+.drink-toggle-btn.active.drink-toggle-light {
+  background: #ffd54a;
+  border-color: #ffd54a;
+  color: #2a2205;
 }
 
 /* Timer */
