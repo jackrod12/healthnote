@@ -170,21 +170,6 @@
         <input type="file" id="import-file-input" accept="application/json" hidden />
       </div>
 
-      <button type="button" class="btn btn-primary btn-block" id="btn-toggle-goals-form">목표 설정 +</button>
-      <div id="goal-summary" class="goal-summary"></div>
-
-      <div class="card" id="goals-form-card" hidden>
-        <h2 class="card-title">내 목표</h2>
-        <form id="goals-form" class="form-grid">
-          <label>현재 체중(kg)<input type="number" step="0.1" id="goal-current-weight" /></label>
-          <label>목표 체중(kg)<input type="number" step="0.1" id="goal-target-weight" /></label>
-          <label>목표 체지방률(%)<input type="number" step="0.1" id="goal-target-fat" /></label>
-          <label>목표 골격근량(kg)<input type="number" step="0.1" id="goal-target-muscle" /></label>
-          <label>목표 메모<input type="text" id="goal-note" placeholder="예: 여름까지 체지방 5% 감량" /></label>
-          <button type="submit" class="btn btn-primary btn-block">저장</button>
-        </form>
-      </div>
-
       <button type="button" class="btn btn-primary btn-block" id="btn-toggle-equipment-form">기구 추가 +</button>
 
       <div class="card" id="equipment-form-card" hidden>
@@ -230,6 +215,21 @@
           </div>
           <div id="equipment-list" class="summary-list"></div>
         </div>
+      </div>
+
+      <button type="button" class="btn btn-primary btn-block" id="btn-toggle-goals-form">목표 설정 +</button>
+      <div id="goal-summary" class="goal-summary"></div>
+
+      <div class="card" id="goals-form-card" hidden>
+        <h2 class="card-title">내 목표</h2>
+        <form id="goals-form" class="form-grid">
+          <label>현재 체중(kg)<input type="number" step="0.1" id="goal-current-weight" /></label>
+          <label>목표 체중(kg)<input type="number" step="0.1" id="goal-target-weight" /></label>
+          <label>목표 체지방률(%)<input type="number" step="0.1" id="goal-target-fat" /></label>
+          <label>목표 골격근량(kg)<input type="number" step="0.1" id="goal-target-muscle" /></label>
+          <label>목표 메모<input type="text" id="goal-note" placeholder="예: 여름까지 체지방 5% 감량" /></label>
+          <button type="submit" class="btn btn-primary btn-block">저장</button>
+        </form>
       </div>
     </section>
 
