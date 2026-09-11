@@ -461,7 +461,7 @@ async function renderWeeklyVolumeChart() {
   );
 }
 
-/* estimated calories: strength training uses total volume(kg) x 0.05,
+/* estimated calories: strength training uses total volume(kg) x 0.05 x (body weight / 70),
    running uses distance(km) x body weight(kg) x 1.04 */
 const CALORIES_PER_KG_VOLUME = 0.05;
 const RUNNING_KCAL_PER_KM_PER_KG = 1.04;
@@ -474,8 +474,8 @@ function calcLogVolume(log) {
     .reduce((sum, s) => sum + toKg(s) * s.reps, 0);
 }
 
-function calcCaloriesFromVolume(volume) {
-  return volume * CALORIES_PER_KG_VOLUME;
+function calcCaloriesFromVolume(volume, bodyWeightKg) {
+  return volume * CALORIES_PER_KG_VOLUME * (bodyWeightKg / DEFAULT_BODY_WEIGHT_KG);
 }
 
 async function getLatestBodyWeightKg() {
@@ -507,10 +507,11 @@ async function renderEquipmentLogTable() {
     return;
   }
 
+  const bodyWeightKg = await getLatestBodyWeightKg();
   const rows = logs
     .map((log) => {
       const volume = calcLogVolume(log);
-      const calories = calcCaloriesFromVolume(volume);
+      const calories = calcCaloriesFromVolume(volume, bodyWeightKg);
       return `
         <tr>
           <td>${log.date}</td>
@@ -563,7 +564,7 @@ async function renderWorkoutLogList(logs) {
       div.className = "log-item";
       if (log.type === "weight") {
         const volume = calcLogVolume(log);
-        const calories = calcCaloriesFromVolume(volume);
+        const calories = calcCaloriesFromVolume(volume, bodyWeightKg);
         totalVolume += volume;
         totalCalories += calories;
         div.innerHTML = `
