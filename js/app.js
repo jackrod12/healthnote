@@ -578,6 +578,23 @@ $("#stats-equipment-select").addEventListener("change", () => {
   renderEquipmentLogTable();
 });
 
+/* manual ordering: sortOrder is a lazily-assigned field (see reorderWorkoutLogs).
+   Logs without it fall back to id, which reproduces the original newest-first
+   order, so legacy logs stay exactly where they were. */
+function sortWorkoutLogsForDisplay(logs) {
+  return logs.slice().sort((a, b) => (b.sortOrder ?? b.id) - (a.sortOrder ?? a.id));
+}
+
+async function moveWorkoutLog(logs, logId, direction) {
+  const ordered = sortWorkoutLogsForDisplay(logs);
+  const idx = ordered.findIndex((l) => l.id === logId);
+  if (idx === -1) return;
+  const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (targetIdx < 0 || targetIdx >= ordered.length) return;
+  [ordered[idx], ordered[targetIdx]] = [ordered[targetIdx], ordered[idx]];
+  await db.reorderWorkoutLogs(ordered.map((l) => l.id));
+}
+
 async function renderWorkoutLogList(logs) {
   const container = $("#workout-log-list");
   const totalsEl = $("#workout-log-totals");
@@ -591,53 +608,78 @@ async function renderWorkoutLogList(logs) {
   let totalCalories = 0;
   const bodyWeightKg = await getLatestBodyWeightKg();
 
-  logs
-    .slice()
-    .sort((a, b) => b.id - a.id)
-    .forEach((log) => {
+  const ordered = sortWorkoutLogsForDisplay(logs);
+
+  ordered.forEach((log, index) => {
       const div = document.createElement("div");
       div.className = "log-item";
+      let mainHtml = "";
       if (log.type === "weight") {
         const volume = calcLogVolume(log);
         const calories = calcCaloriesFromVolume(volume, bodyWeightKg);
         totalVolume += volume;
         totalCalories += calories;
-        div.innerHTML = `
+        mainHtml = `
           <div class="log-main">
             <span class="log-title">${log.equipmentName}</span>
             <span class="log-sub">${log.sets.length}세트 · ${formatSetsSummary(log.sets)}</span>
             <span class="log-sub">볼륨 ${Math.round(volume)}kg · 칼로리 ${Math.round(calories)}kcal</span>
-          </div>
-          <button class="log-delete" data-id="${log.id}">✕</button>`;
+          </div>`;
       } else if (log.type === "running") {
         const calories = calcRunningCalories(log, bodyWeightKg);
         totalCalories += calories;
-        div.innerHTML = `
+        mainHtml = `
           <div class="log-main">
             <span class="log-title">러닝</span>
             <span class="log-sub">${log.distance}km · ${log.duration}분 · ${log.pace}분/km</span>
-          </div>
-          <button class="log-delete" data-id="${log.id}">✕</button>`;
+          </div>`;
       } else if (log.type === "stairmaster") {
         const calories = calcStairmasterCalories(log, bodyWeightKg);
         totalCalories += calories;
         const minutes = Math.floor(log.duration / 60);
         const seconds = log.duration % 60;
-        div.innerHTML = `
+        mainHtml = `
           <div class="log-main">
             <span class="log-title">천국의계단</span>
             <span class="log-sub">단계 ${log.level} · ${minutes}분 ${seconds}초 · 약 ${Math.round(calories)}kcal</span>
-          </div>
-          <button class="log-delete" data-id="${log.id}">✕</button>`;
+          </div>`;
       }
+
+      const isFirst = index === 0;
+      const isLast = index === ordered.length - 1;
+      div.innerHTML = `
+        ${mainHtml}
+        <div class="log-item-actions">
+          <button type="button" class="icon-btn log-move-up" data-id="${log.id}" ${isFirst ? "disabled" : ""}>▲</button>
+          <button type="button" class="icon-btn log-move-down" data-id="${log.id}" ${isLast ? "disabled" : ""}>▼</button>
+          <button type="button" class="log-delete" data-id="${log.id}">✕</button>
+        </div>`;
       container.appendChild(div);
-    });
+  });
 
   totalsEl.hidden = false;
   totalsEl.innerHTML = `
     <div>오늘 총 볼륨 ${Math.round(totalVolume)}kg</div>
     <div>오늘 총 소모 칼로리: 약 ${Math.round(totalCalories)}kcal</div>
   `;
+
+  $$(".log-move-up", container).forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (btn.disabled) return;
+      await moveWorkoutLog(logs, Number(btn.dataset.id), "up");
+      const refreshed = await db.getWorkoutLogsByDate(todayStr());
+      await renderWorkoutLogList(refreshed);
+    });
+  });
+
+  $$(".log-move-down", container).forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (btn.disabled) return;
+      await moveWorkoutLog(logs, Number(btn.dataset.id), "down");
+      const refreshed = await db.getWorkoutLogsByDate(todayStr());
+      await renderWorkoutLogList(refreshed);
+    });
+  });
 
   $$(".log-delete", container).forEach((btn) => {
     btn.addEventListener("click", async () => {

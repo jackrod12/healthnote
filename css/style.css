@@ -552,6 +552,22 @@ input[type="range"] {
   align-items: center;
   justify-content: center;
 }
+.icon-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+/* Today's workout log: reorder + delete actions */
+.log-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: none;
+}
+.log-item-actions .icon-btn {
+  font-size: 14px;
+  min-width: 36px;
+}
 
 .photo-field {
   display: flex;

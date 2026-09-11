@@ -36,7 +36,7 @@ export function drawLineChart(canvas, labels, values, options = {}) {
     return;
   }
 
-  const padding = { top: 16, right: 14, bottom: 22, left: 14 };
+  const padding = { top: 28, right: 20, bottom: 22, left: 20 };
   const plotW = width - padding.left - padding.right;
   const plotH = height - padding.top - padding.bottom;
 
@@ -93,17 +93,23 @@ export function drawLineChart(canvas, labels, values, options = {}) {
     ctx.fill();
   });
 
-  // axis min/max labels (min sits just above the bottom gridline so it never
-  // collides with the date label drawn below the plot area)
+  // per-point value labels, sitting 8px above each point
   const roundTo1 = (v) => Math.round(v * 10) / 10;
-  ctx.fillStyle = TEXT_DIM;
-  ctx.font = "13px system-ui";
-  ctx.textAlign = "left";
-  ctx.fillText(`${roundTo1(max)}${unit}`, padding.left, padding.top - 4);
-  ctx.fillText(`${roundTo1(min)}${unit}`, padding.left, padding.top + plotH - 4);
+  ctx.fillStyle = MINT;
+  ctx.font = "11px system-ui";
+  values.forEach((v, i) => {
+    const x = xFor(i);
+    const y = yFor(v);
+    if (i === 0) ctx.textAlign = "left";
+    else if (i === values.length - 1) ctx.textAlign = "right";
+    else ctx.textAlign = "center";
+    ctx.fillText(`${roundTo1(v)}${unit}`, x, y - 8);
+  });
 
   // first/last date labels
   if (labels && labels.length) {
+    ctx.fillStyle = TEXT_DIM;
+    ctx.font = "13px system-ui";
     const labelY = padding.top + plotH + 16;
     ctx.textAlign = "left";
     ctx.fillText(labels[0], padding.left, labelY);
@@ -134,7 +140,7 @@ export function drawBarChart(canvas, labels, values, options = {}) {
     return;
   }
 
-  const padding = { top: 20, right: 14, bottom: 24, left: 14 };
+  const padding = { top: 24, right: 14, bottom: 24, left: 14 };
   const plotW = width - padding.left - padding.right;
   const plotH = height - padding.top - padding.bottom;
 
@@ -170,11 +176,27 @@ export function drawBarChart(canvas, labels, values, options = {}) {
     ctx.fill();
   });
 
-  // max label
-  ctx.fillStyle = TEXT_DIM;
-  ctx.font = "13px system-ui";
-  ctx.textAlign = "left";
-  ctx.fillText(`${Math.round(max)}${unit}`, padding.left, padding.top - 6);
+  // per-bar value labels: 11px white, inside near the top of tall bars,
+  // just above the bar when it is too short to fit the label inside
+  const LABEL_INSIDE_MIN_HEIGHT = 24;
+  ctx.font = "11px system-ui";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#ffffff";
+  values.forEach((v, i) => {
+    if (!v) return;
+    const barHeight = Math.max(1, (v / max) * plotH);
+    const barTop = padding.top + plotH - barHeight;
+    const x = padding.left + i * (barWidth + barGap) + barWidth / 2;
+    const label = `${Math.round(v)}${unit}`;
+    if (barHeight >= LABEL_INSIDE_MIN_HEIGHT) {
+      ctx.textBaseline = "top";
+      ctx.fillText(label, x, barTop + 10);
+    } else {
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(label, x, barTop - 4);
+    }
+  });
+  ctx.textBaseline = "alphabetic";
 
   // x labels (skip evenly if they would overlap at this font size; always keep the last one)
   if (labels && labels.length) {

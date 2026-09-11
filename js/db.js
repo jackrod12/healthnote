@@ -134,6 +134,25 @@ export async function getAllWorkoutLogs() {
 }
 
 /**
+ * Persists a manual reorder: idsInDisplayOrder lists workout log ids from top
+ * to bottom as the user wants them shown, and each gets a sortOrder counting
+ * down from (n - 1) so a plain descending-sort comparator reproduces it.
+ */
+export async function reorderWorkoutLogs(idsInDisplayOrder) {
+  const db = await getDB();
+  const n = idsInDisplayOrder.length;
+  const tx = db.transaction("workoutLogs", "readwrite");
+  await Promise.all([
+    ...idsInDisplayOrder.map(async (id, index) => {
+      const log = await tx.store.get(id);
+      if (!log) return;
+      await tx.store.put({ ...log, sortOrder: n - 1 - index });
+    }),
+    tx.done,
+  ]);
+}
+
+/**
  * Keeps workoutLogs in sync with an equipment rename: any weight log already
  * linked by equipmentId gets its equipmentName updated, and any legacy log
  * that predates equipmentId (matched by its old equipmentName instead) gets
