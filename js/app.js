@@ -133,13 +133,13 @@ function renderHomeWorkoutSummary(logs) {
   }
   container.innerHTML = "";
   const weightCount = logs.filter((l) => l.type === "weight").length;
-  const runCount = logs.filter((l) => l.type === "running").length;
+  const cardioCount = logs.filter((l) => l.type === "running" || l.type === "stairmaster").length;
   const div = document.createElement("div");
   div.className = "log-item";
   div.innerHTML = `
     <div class="log-main">
       <span class="log-title">오늘 ${logs.length}개 운동 완료</span>
-      <span class="log-sub">웨이트 ${weightCount}개 · 러닝 ${runCount}개</span>
+      <span class="log-sub">웨이트 ${weightCount}개 · 유산소 ${cardioCount}개</span>
     </div>`;
   container.appendChild(div);
 }
@@ -151,7 +151,7 @@ calendarViewDate.setDate(1);
 
 function renderMonthActivityStats(monthLogs, monthDrinkLogs) {
   const weightCount = monthLogs.filter((l) => l.type === "weight").length;
-  const runningCount = monthLogs.filter((l) => l.type === "running").length;
+  const runningCount = monthLogs.filter((l) => l.type === "running" || l.type === "stairmaster").length;
   const drinkCount = monthDrinkLogs.filter((d) => d.type === "drink" || d.type === "light").length;
   const proteinCount = monthDrinkLogs.filter((d) => d.type === "protein").length;
 
@@ -195,7 +195,7 @@ async function renderCalendar() {
   monthLogs.forEach((l) => {
     const info = dayInfoFor(l.date);
     if (l.type === "weight") info.weight = true;
-    if (l.type === "running") info.running = true;
+    if (l.type === "running" || l.type === "stairmaster") info.running = true;
   });
   monthDrinkLogs.forEach((d) => {
     const info = dayInfoFor(d.date);
@@ -283,11 +283,19 @@ async function showDayDetail(dateString) {
           <span class="log-title">${log.equipmentName}</span>
           <span class="log-sub">${log.sets.length}세트 · ${formatSetsSummary(log.sets)}</span>
         </div>`;
-    } else {
+    } else if (log.type === "running") {
       div.innerHTML = `
         <div class="log-main">
           <span class="log-title">러닝</span>
           <span class="log-sub">${log.distance}km · ${log.duration}분 · ${log.pace}분/km</span>
+        </div>`;
+    } else if (log.type === "stairmaster") {
+      const minutes = Math.floor(log.duration / 60);
+      const seconds = log.duration % 60;
+      div.innerHTML = `
+        <div class="log-main">
+          <span class="log-title">천국의계단</span>
+          <span class="log-sub">단계 ${log.level} · ${minutes}분 ${seconds}초 · 약 ${log.calories}kcal</span>
         </div>`;
     }
     container.appendChild(div);
@@ -437,9 +445,34 @@ function calcRunningCalories(log, bodyWeightKg) {
   return met * bodyWeightKg * hours;
 }
 
+/* 천국의계단 (stairmaster) level -> MET */
+const STAIRMASTER_MET_BY_LEVEL = {
+  6: 6.0,
+  7: 7.0,
+  8: 8.0,
+  9: 9.0,
+  10: 10.0,
+  11: 11.0,
+  12: 12.0,
+  13: 13.5,
+  14: 15.0,
+  15: 16.0,
+};
+
+function getStairmasterMET(level) {
+  return STAIRMASTER_MET_BY_LEVEL[level] ?? 10.0;
+}
+
+function calcStairmasterCalories(log, bodyWeightKg) {
+  const met = getStairmasterMET(log.level);
+  const hours = log.duration / 3600;
+  return met * bodyWeightKg * hours;
+}
+
 function calcLogCalories(log, bodyWeightKg) {
   if (log.type === "weight") return calcCaloriesFromVolume(calcLogVolume(log), bodyWeightKg);
   if (log.type === "running") return calcRunningCalories(log, bodyWeightKg);
+  if (log.type === "stairmaster") return calcStairmasterCalories(log, bodyWeightKg);
   return 0;
 }
 
@@ -574,13 +607,24 @@ async function renderWorkoutLogList(logs) {
             <span class="log-sub">볼륨 ${Math.round(volume)}kg · 칼로리 ${Math.round(calories)}kcal</span>
           </div>
           <button class="log-delete" data-id="${log.id}">✕</button>`;
-      } else {
+      } else if (log.type === "running") {
         const calories = calcRunningCalories(log, bodyWeightKg);
         totalCalories += calories;
         div.innerHTML = `
           <div class="log-main">
             <span class="log-title">러닝</span>
             <span class="log-sub">${log.distance}km · ${log.duration}분 · ${log.pace}분/km</span>
+          </div>
+          <button class="log-delete" data-id="${log.id}">✕</button>`;
+      } else if (log.type === "stairmaster") {
+        const calories = calcStairmasterCalories(log, bodyWeightKg);
+        totalCalories += calories;
+        const minutes = Math.floor(log.duration / 60);
+        const seconds = log.duration % 60;
+        div.innerHTML = `
+          <div class="log-main">
+            <span class="log-title">천국의계단</span>
+            <span class="log-sub">단계 ${log.level} · ${minutes}분 ${seconds}초 · 약 ${Math.round(calories)}kcal</span>
           </div>
           <button class="log-delete" data-id="${log.id}">✕</button>`;
       }
@@ -609,7 +653,52 @@ const modalAddWorkout = $("#modal-add-workout");
 
 $("#btn-add-workout").addEventListener("click", () => {
   modalAddWorkout.hidden = false;
+  updateWeightFormMode();
 });
+
+/* 천국의계단 (stairmaster) special entry mode, toggled by the selected equipment */
+let stairmasterBodyWeightKg = DEFAULT_BODY_WEIGHT_KG;
+
+function isStairmasterSelected() {
+  const equipmentId = Number($("#weight-equipment").value);
+  const equipment = equipmentCache.find((eq) => eq.id === equipmentId);
+  return equipment?.name === STAIRMASTER_NAME;
+}
+
+async function updateWeightFormMode() {
+  const stairmaster = isStairmasterSelected();
+  $("#weight-set-section").hidden = stairmaster;
+  $("#stairmaster-section").hidden = !stairmaster;
+  if (stairmaster) {
+    stairmasterBodyWeightKg = await getLatestBodyWeightKg();
+    updateStairmasterCaloriePreview();
+  }
+}
+
+function updateStairmasterCaloriePreview() {
+  const level = Number($("#stairmaster-level").value);
+  $("#stairmaster-level-value").textContent = level;
+  const met = getStairmasterMET(level);
+  $("#stairmaster-met-value").textContent = met.toFixed(1);
+  const minutes = Number($("#stairmaster-minutes").value) || 0;
+  const seconds = Number($("#stairmaster-seconds").value) || 0;
+  const calories = met * stairmasterBodyWeightKg * ((minutes * 60 + seconds) / 3600);
+  $("#stairmaster-calorie-preview").textContent = Math.round(calories);
+}
+
+$("#weight-equipment").addEventListener("change", updateWeightFormMode);
+$("#stairmaster-level").addEventListener("input", updateStairmasterCaloriePreview);
+$("#stairmaster-minutes").addEventListener("input", updateStairmasterCaloriePreview);
+$("#stairmaster-seconds").addEventListener("input", updateStairmasterCaloriePreview);
+
+function resetStairmasterState() {
+  $("#stairmaster-level").value = 10;
+  $("#stairmaster-minutes").value = "";
+  $("#stairmaster-seconds").value = "";
+  $("#stairmaster-level-value").textContent = "10";
+  $("#stairmaster-met-value").textContent = "10.0";
+  $("#stairmaster-calorie-preview").textContent = "0";
+}
 
 /* weight sets (in-progress entry before "운동 완료") */
 let currentSets = [];
@@ -630,7 +719,10 @@ function renderSetList() {
         <span class="log-title">세트 ${i + 1}</span>
         <span class="log-sub">${formatSet(set)}</span>
       </div>
-      <button type="button" class="log-delete" data-index="${i}">✕</button>`;
+      <div class="set-item-actions">
+        <button type="button" class="btn btn-ghost btn-sm set-copy" data-index="${i}">복사</button>
+        <button type="button" class="log-delete" data-index="${i}">✕</button>
+      </div>`;
     container.appendChild(div);
   });
   $$(".log-delete", container).forEach((btn) => {
@@ -640,6 +732,22 @@ function renderSetList() {
       updateEquipmentLock();
     });
   });
+  $$(".set-copy", container).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      copySetToEntry(currentSets[Number(btn.dataset.index)]);
+    });
+  });
+}
+
+function copySetToEntry(set) {
+  if (!set) return;
+  $("#set-entry").hidden = false;
+  currentSetUnit = set.unit;
+  $$(".segmented-btn", $("#weight-unit-toggle")).forEach((b) => b.classList.toggle("active", b.dataset.unit === set.unit));
+  const isNone = set.unit === "none";
+  $("#set-weight-label").hidden = isNone;
+  $("#set-weight").value = isNone ? "" : set.weight;
+  $("#set-reps").value = set.reps;
 }
 
 function resetSetEntryState() {
@@ -659,6 +767,7 @@ function closeAddWorkoutModal() {
   resetSetEntryState();
   $("#form-running").reset();
   $("#running-pace-preview").textContent = "-";
+  resetStairmasterState();
 }
 
 $("#btn-cancel-weight").addEventListener("click", closeAddWorkoutModal);
@@ -717,6 +826,36 @@ $("#btn-finish-weight").addEventListener("click", async () => {
     showToast("기구를 먼저 설정 탭에서 등록해주세요.");
     return;
   }
+
+  if (equipment.name === STAIRMASTER_NAME) {
+    const level = Number($("#stairmaster-level").value);
+    const minutes = Number($("#stairmaster-minutes").value) || 0;
+    const seconds = Number($("#stairmaster-seconds").value) || 0;
+    const duration = minutes * 60 + seconds;
+    if (duration <= 0) {
+      showToast("운동 시간을 입력해주세요.");
+      return;
+    }
+    const met = getStairmasterMET(level);
+    const calories = Math.round(met * stairmasterBodyWeightKg * (duration / 3600));
+
+    const log = {
+      date: todayStr(),
+      type: "stairmaster",
+      level,
+      duration,
+      calories,
+      createdAt: Date.now(),
+    };
+    await db.addWorkoutLog(log);
+    closeAddWorkoutModal();
+    const logs = await db.getWorkoutLogsByDate(todayStr());
+    await renderWorkoutLogList(logs);
+    renderHomeWorkoutSummary(logs);
+    showToast("천국의계단 운동이 기록되었어요");
+    return;
+  }
+
   if (!currentSets.length) {
     showToast("세트를 먼저 기록해주세요.");
     return;
@@ -936,7 +1075,17 @@ const DEFAULT_EQUIPMENT = [
   { name: "글루트머신(힙)", category: "하체" },
   { name: "이지바", category: "팔" },
   { name: "플랩바", category: "팔" },
+  { name: "천국의계단", category: "유산소" },
 ];
+
+const STAIRMASTER_NAME = "천국의계단";
+
+async function ensureStairmasterEquipment() {
+  const existing = await db.getEquipmentList();
+  if (!existing.some((eq) => eq.name === STAIRMASTER_NAME)) {
+    await db.addEquipment({ name: STAIRMASTER_NAME, manufacturer: "", category: "유산소", memo: "", photo: null });
+  }
+}
 
 /* ---------------- settings tab ---------------- */
 
@@ -1027,6 +1176,25 @@ async function renderEquipmentList() {
   renderEquipmentCategoryTabs();
   renderFilteredEquipmentItems();
 }
+
+/* accordion: 기구 등록 폼 펼치기/접기 */
+const equipmentFormCard = $("#equipment-form-card");
+const btnToggleEquipmentForm = $("#btn-toggle-equipment-form");
+
+function openEquipmentForm() {
+  equipmentFormCard.hidden = false;
+  btnToggleEquipmentForm.textContent = "닫기";
+}
+
+function closeEquipmentForm() {
+  equipmentFormCard.hidden = true;
+  btnToggleEquipmentForm.textContent = "기구 추가 +";
+}
+
+btnToggleEquipmentForm.addEventListener("click", () => {
+  if (equipmentFormCard.hidden) openEquipmentForm();
+  else closeEquipmentForm();
+});
 
 function renderFilteredEquipmentItems() {
   const container = $("#equipment-list");
@@ -1214,6 +1382,7 @@ $("#equipment-form").addEventListener("submit", async (e) => {
   pendingAddPhoto = null;
   $("#equipment-photo-preview").hidden = true;
   $("#equipment-photo-preview").src = "";
+  closeEquipmentForm();
   await renderEquipmentList();
   showToast("기구가 추가되었어요");
 });
@@ -1291,6 +1460,7 @@ function getLastTab() {
 async function init() {
   initTopbarDate();
   await db.seedDefaultEquipmentIfEmpty(DEFAULT_EQUIPMENT);
+  await ensureStairmasterEquipment();
   await db.deleteSetting("weeklyRoutinePrefs");
   await db.deleteSetting("weeklyRoutine");
   await db.deleteSetting("defaultRestSeconds");

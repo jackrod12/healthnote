@@ -172,7 +172,9 @@
         </form>
       </div>
 
-      <div class="card">
+      <button type="button" class="btn btn-primary btn-block" id="btn-toggle-equipment-form">기구 추가 +</button>
+
+      <div class="card" id="equipment-form-card" hidden>
         <h2 class="card-title">헬스장 기구 등록</h2>
         <form id="equipment-form" class="form-grid">
           <label>기구명<input type="text" id="equipment-name" required /></label>
@@ -200,6 +202,9 @@
           </div>
           <button type="submit" class="btn btn-primary btn-block">추가</button>
         </form>
+      </div>
+
+      <div class="card">
         <div class="pill-row" id="equipment-category-tabs"></div>
         <div class="equipment-list-actions">
           <label class="checkbox-label"><input type="checkbox" id="equipment-select-all" /> 전체 선택</label>
@@ -244,20 +249,34 @@
         <select id="weight-equipment"></select>
       </label>
 
-      <button type="button" class="btn btn-ghost btn-block" id="btn-add-set">+ 세트 추가</button>
+      <div id="weight-set-section">
+        <button type="button" class="btn btn-ghost btn-block" id="btn-add-set">+ 세트 추가</button>
 
-      <div class="set-entry form-grid" id="set-entry" hidden>
-        <div class="segmented" id="weight-unit-toggle">
-          <button type="button" class="segmented-btn active" data-unit="kg">kg</button>
-          <button type="button" class="segmented-btn" data-unit="lb">lb</button>
-          <button type="button" class="segmented-btn" data-unit="none">무게없음</button>
+        <div class="set-entry form-grid" id="set-entry" hidden>
+          <div class="segmented" id="weight-unit-toggle">
+            <button type="button" class="segmented-btn active" data-unit="kg">kg</button>
+            <button type="button" class="segmented-btn" data-unit="lb">lb</button>
+            <button type="button" class="segmented-btn" data-unit="none">무게없음</button>
+          </div>
+          <label id="set-weight-label">무게<input type="number" step="0.5" id="set-weight" /></label>
+          <label>횟수<input type="number" id="set-reps" min="1" /></label>
+          <button type="button" class="btn btn-primary btn-block" id="btn-record-set">기록</button>
         </div>
-        <label id="set-weight-label">무게<input type="number" step="0.5" id="set-weight" /></label>
-        <label>횟수<input type="number" id="set-reps" min="1" /></label>
-        <button type="button" class="btn btn-primary btn-block" id="btn-record-set">기록</button>
+
+        <div id="set-list" class="summary-list"></div>
       </div>
 
-      <div id="set-list" class="summary-list"></div>
+      <div id="stairmaster-section" class="form-grid" hidden>
+        <label>단계 (6~15)
+          <input type="range" id="stairmaster-level" min="6" max="15" step="1" value="10" />
+        </label>
+        <div class="stairmaster-level-display">단계 <span id="stairmaster-level-value">10</span> · MET <span id="stairmaster-met-value">10.0</span></div>
+        <div class="stairmaster-time-row">
+          <label>분<input type="number" id="stairmaster-minutes" min="0" step="1" /></label>
+          <label>초<input type="number" id="stairmaster-seconds" min="0" max="59" step="1" /></label>
+        </div>
+        <div class="stairmaster-calorie-preview">예상 칼로리: 약 <span id="stairmaster-calorie-preview">0</span>kcal</div>
+      </div>
 
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" id="btn-cancel-weight">취소</button>
