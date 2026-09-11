@@ -1,16 +1,17 @@
 import * as db from "./db.js";
 
 /* =====================================================================
- * 뱃지 시스템
+ * 뱃지 시스템 — 마라톤 완주 메달 스타일
  * 모든 뱃지는 DB에 저장되지 않고, 기존 기록(workoutLogs/inbodyRecords/
- * drinkLog2)으로부터 매번 다시 계산됩니다. "달성일"은 조건을 최초로
- * 만족시킨 시점의 날짜를 데이터에서 역산해서 구합니다.
+ * drinkLog2/routines/workoutMemo/settings)으로부터 매번 다시 계산됩니다.
+ * "달성일"은 조건을 최초로 만족시킨 시점의 날짜를 데이터에서 역산해서
+ * 구합니다.
  *
- * 디자인: 포켓몬 체육관 뱃지 스타일 — 카테고리별 외곽 형태(방패/원/다이아
- * 몬드/육각형/별/번개) + 티어별 메탈릭 그라디언트(청동/은/금/에메랄드/
- * 다이아몬드) + 상단 하이라이트 + 하단 그림자. 달성/미달성 톤(그레이스케일
- * +30% 불투명도+🔒)은 app.js의 CSS가 담당하고, 여기서는 항상 풀컬러 SVG를
- * 만들어 낸다.
+ * 디자인: 카테고리별 메달 외곽 형태(방패/불꽃원/다이아몬드/육각형/별/번개/
+ * 로제트/선버스트/팔각형/크레스트/실)에 리본을 두르고, 티어별 메탈릭
+ * 그라디언트(청동→은→금→백금→다이아몬드→흑요석)를 입힌다. 달성/미달성
+ * 톤(그레이스케일+20% 불투명도)은 app.js의 CSS가 담당하고, 여기서는
+ * 항상 풀컬러 SVG를 만들어 낸다.
  * ===================================================================== */
 
 export const BADGE_CATEGORIES = [
@@ -19,11 +20,19 @@ export const BADGE_CATEGORIES = [
   { key: "cardio", label: "유산소", color: "#4A9EFF" },
   { key: "inbody", label: "인바디", color: "#00E5A0" },
   { key: "lifestyle", label: "생활습관", color: "#A855F7" },
-  { key: "volume", label: "볼륨", color: "#FF4444" },
+  { key: "volume", label: "볼륨 & 칼로리", color: "#FF4444" },
+  { key: "style", label: "운동 스타일 & 개성", color: "#FF8FB1" },
+  { key: "special", label: "특별한 순간", color: "#FFB84D" },
+  { key: "milestone", label: "운동량 마일스톤", color: "#38BDF8" },
+  { key: "challenge", label: "챌린지", color: "#F43F5E" },
+  { key: "hidden", label: "히든", color: "#8B5CF6" },
 ];
 
-/* ---------------- 티어(단계)별 메탈릭 컬러 ---------------- */
-export const TIER_COLORS = ["#CD7F32", "#C0C0C0", "#FFD700", "#50C878", "#B9F2FF"];
+/* 레전더리 취급(무지개 shimmer) 카테고리 */
+export const LEGENDARY_CATEGORIES = ["special", "challenge", "hidden"];
+
+/* ---------------- 티어(단계)별 메탈릭 컬러: 청동→은→금→백금→다이아몬드→흑요석 ---------------- */
+export const TIER_COLORS = ["#CD7F32", "#C0C0C0", "#FFD700", "#E5E4E2", "#B9F2FF", "#6B4E8E"];
 
 /* ---------------- 카테고리 → 외곽 형태 ---------------- */
 const CATEGORY_SHAPE = {
@@ -33,6 +42,11 @@ const CATEGORY_SHAPE = {
   inbody: "hexagon",
   lifestyle: "star",
   volume: "bolt",
+  style: "circle-rosette",
+  special: "circle-sunburst",
+  milestone: "octagon",
+  challenge: "crest",
+  hidden: "circle-seal",
 };
 
 /* ---------------- 색상 유틸 ---------------- */
@@ -57,13 +71,23 @@ function darken(hex, amt) {
   return rgbToHex(r * (1 - amt), g * (1 - amt), b * (1 - amt));
 }
 
-/* ---------------- 외곽 형태 path (viewBox 0 0 40 40) ---------------- */
+/* ---------------- 외곽 형태 path (내부 좌표계 0..40) ---------------- */
 function starPath(cx, cy, outerR, innerR, points) {
   const step = Math.PI / points;
   let d = "";
   for (let i = 0; i < points * 2; i++) {
     const r = i % 2 === 0 ? outerR : innerR;
     const angle = -Math.PI / 2 + i * step;
+    const x = (cx + r * Math.cos(angle)).toFixed(2);
+    const y = (cy + r * Math.sin(angle)).toFixed(2);
+    d += (i === 0 ? "M" : "L") + x + " " + y + " ";
+  }
+  return d + "Z";
+}
+function regularPolygonPath(cx, cy, r, sides, rotationDeg = -90) {
+  let d = "";
+  for (let i = 0; i < sides; i++) {
+    const angle = ((rotationDeg + (360 / sides) * i) * Math.PI) / 180;
     const x = (cx + r * Math.cos(angle)).toFixed(2);
     const y = (cy + r * Math.sin(angle)).toFixed(2);
     d += (i === 0 ? "M" : "L") + x + " " + y + " ";
@@ -77,10 +101,27 @@ const SHAPES = {
   hexagon: "M20 3 L35 11.5 L35 28.5 L20 37 L5 28.5 L5 11.5 Z",
   bolt: "M24 2 L9 23 H18 L15 38 L33 15 H23 Z",
   star: starPath(20, 20, 18, 7.2, 5),
+  octagon: regularPolygonPath(20, 20, 17, 8, -90),
+  crest: "M9 3 H31 L34 9 V19 C34 29 27 35.5 20 38.5 C13 35.5 6 29 6 19 V9 Z",
 };
 
+/* 원형 + 꽃잎/스파이크 링(streak/style/special/hidden)을 이루는 작은 단위 도형 */
 const FLAME_SPIKE_D = "M20 1 C21.8 4.5 21.8 7 20 9.5 C18.2 7 18.2 4.5 20 1 Z";
-const FLAME_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315];
+const ROSETTE_PETAL_D = "M20 1 L22.6 8 L20 6.8 L17.4 8 Z";
+const SUNBURST_SPIKE_D = "M20 0 L21.3 8.5 L18.7 8.5 Z";
+const SEAL_SCALLOP_D = "M20 2 Q22.4 2 22.4 6 Q20 8.2 17.6 6 Q17.6 2 20 2 Z";
+
+const RING_SHAPES = {
+  "circle-flame": { petal: FLAME_SPIKE_D, count: 8, r: 13 },
+  "circle-rosette": { petal: ROSETTE_PETAL_D, count: 10, r: 14 },
+  "circle-sunburst": { petal: SUNBURST_SPIKE_D, count: 12, r: 13 },
+  "circle-seal": { petal: SEAL_SCALLOP_D, count: 16, r: 15 },
+};
+Object.values(RING_SHAPES).forEach((cfg) => {
+  cfg.angles = Array.from({ length: cfg.count }, (_, i) => (360 / cfg.count) * i);
+});
+
+const STAR_GLYPH_PATH = starPath(20, 20, 11, 4.5, 5);
 
 /* ---------------- 뱃지 내부 글리프(작은 장식 아이콘) ---------------- */
 const GLYPHS = {
@@ -136,6 +177,55 @@ const GLYPHS = {
     <path d="M10 6h20l-3 22a3 3 0 01-3 3H16a3 3 0 01-3-3z" stroke="#fff" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
     <path d="M14 12l12 12M26 12L14 24" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>`,
   heart: `<path d="M20 34S5 24 5 14a8 8 0 0115-4 8 8 0 0115 4c0 10-15 20-15 20z" fill="#fff"/>`,
+  trophy: `
+    <path d="M12 6h16v10a8 8 0 01-16 0V6z" fill="#fff"/>
+    <path d="M12 8H6a2 2 0 000 4c0 3 2 5 5 6M28 8h6a2 2 0 010 4c0 3-2 5-5 6"
+      stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <rect x="17" y="24" width="6" height="7" fill="#fff"/>
+    <rect x="12" y="31" width="16" height="4" rx="1.5" fill="#fff"/>`,
+  boltGlyph: `<path d="M22 3 8 22h9l-3 15 17-21h-10l1-13z" fill="#fff"/>`,
+  sunrise: `
+    <path d="M4 24h32" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M10 24a10 10 0 0120 0" fill="#fff"/>
+    <path d="M20 6v4M10 10l3 3M30 10l-3 3" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>`,
+  moon: `<path d="M27 6a15 15 0 100 28 12 12 0 010-28z" fill="#fff"/>`,
+  flag: `
+    <rect x="8" y="4" width="3" height="32" rx="1.5" fill="#fff"/>
+    <path d="M11 6h18l-5 7 5 7H11z" fill="#fff"/>`,
+  sunNoon: `
+    <circle cx="20" cy="20" r="9" fill="#fff"/>
+    <path d="M20 3v5M20 32v5M3 20h5M32 20h5M8 8l3.5 3.5M28.5 28.5L32 32M8 32l3.5-3.5M28.5 11.5L32 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>`,
+  raindrop: `<path d="M20 4c6 9 11 16 11 22a11 11 0 01-22 0c0-6 5-13 11-22z" fill="#fff"/>`,
+  checklist: `
+    <rect x="7" y="6" width="26" height="28" rx="3" stroke="#fff" stroke-width="2.3" fill="none"/>
+    <path d="M12 14l3 3 5-6M12 24l3 3 5-6" stroke="#fff" stroke-width="2.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M23 15h7M23 25h7" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/>`,
+  pencil: `<path d="M8 32l2-8 16-16 6 6-16 16-8 2z" fill="#fff"/>`,
+  footprint: `
+    <ellipse cx="16" cy="24" rx="6" ry="9" fill="#fff"/>
+    <ellipse cx="26" cy="12" rx="5" ry="7" fill="#fff" opacity="0.85"/>`,
+  sparkle: `<path d="M20 4 L23 17 L36 20 L23 23 L20 36 L17 23 L4 20 L17 17 Z" fill="#fff"/>`,
+  seasons: `
+    <path d="M20 20 C20 10 14 6 8 8 C10 14 14 20 20 20Z" fill="#fff" opacity="0.9"/>
+    <path d="M20 20 C30 20 34 14 32 8 C26 10 20 14 20 20Z" fill="#fff" opacity="0.75"/>
+    <path d="M20 20 C20 30 26 34 32 32 C30 26 26 20 20 20Z" fill="#fff" opacity="0.6"/>
+    <path d="M20 20 C10 20 6 26 8 32 C14 30 20 26 20 20Z" fill="#fff" opacity="0.45"/>`,
+  starGlyph: `<path d="${STAR_GLYPH_PATH}" fill="#fff"/>`,
+  target: `
+    <circle cx="20" cy="20" r="15" fill="#fff" opacity="0.25"/>
+    <circle cx="20" cy="20" r="15" stroke="#fff" stroke-width="2" fill="none"/>
+    <circle cx="20" cy="20" r="9" stroke="#fff" stroke-width="2" fill="none"/>
+    <circle cx="20" cy="20" r="3" fill="#fff"/>`,
+  chart: `
+    <path d="M6 34V10M6 34h28" stroke="#fff" stroke-width="2.3" fill="none" stroke-linecap="round"/>
+    <path d="M10 28l7-9 6 5 9-14" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
+  snowflake: `
+    <path d="M20 4v32M6 12l28 16M6 28l28-16" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M20 4l-3 4M20 4l3 4M20 36l-3-4M20 36l3-4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>`,
+  turtle: `
+    <ellipse cx="20" cy="22" rx="12" ry="9" fill="#fff"/>
+    <circle cx="33" cy="20" r="4" fill="#fff"/>
+    <path d="M10 16l-4-2M10 28l-4 2M30 16l4-2M30 28l4 2" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>`,
 };
 
 function escapeXml(str) {
@@ -187,27 +277,43 @@ function svgDefs(uid, color) {
   `;
 }
 
-/* 포켓몬 체육관 뱃지 스타일 SVG 생성: 방패/원(불꽃테두리)/다이아몬드/육각형/별/번개
-   외곽 + 티어 메탈릭 그라디언트 + 상단 글로시 하이라이트 + 하단 드롭섀도. */
+/* 메달 뒤로 드리워진 리본 꼬리 (외곽 60x60 좌표계) */
+function ribbonMarkup(color) {
+  const dark1 = darken(color, 0.15);
+  const dark2 = darken(color, 0.4);
+  return `
+    <path d="M24 30 L32 30 L36 58 L28 50 L20 58 Z" fill="${dark2}" opacity="0.9"/>
+    <path d="M26 30 L34 30 L37 56 L30 49 L23 56 Z" fill="${dark1}"/>
+  `;
+}
+
+const SPARKLE_GEM_D = "M47 3 L48.7 6.7 L52.5 8 L48.7 9.3 L47 13 L45.3 9.3 L41.5 8 L45.3 6.7 Z";
+
+/* 마라톤 완주 메달 스타일 SVG 생성: 리본 + 카테고리별 메달 외곽(방패/불꽃원/
+   다이아몬드/육각형/별/번개/로제트/선버스트/팔각형/크레스트/실) + 티어
+   메탈릭 그라디언트 + 글로시 하이라이트 + 드롭섀도 + (고티어) 보석 반짝임. */
 export function renderBadgeIconSvg(badge, opts = {}) {
-  const size = opts.size || 40;
+  const size = opts.size || 60;
   const uid = badge.id.replace(/[^a-zA-Z0-9]/g, "");
   const color = TIER_COLORS[badge.tier % TIER_COLORS.length];
   const strokeColor = darken(color, 0.5);
   const defs = svgDefs(uid, color);
 
   let shapeMarkup;
-  if (badge.shape === "circle-flame") {
-    const spikes = FLAME_ANGLES.map(
-      (deg) =>
-        `<path d="${FLAME_SPIKE_D}" transform="rotate(${deg} 20 20)" fill="url(#g-${uid})" stroke="${strokeColor}" stroke-width="0.5"/>`
-    ).join("");
+  const ring = RING_SHAPES[badge.shape];
+  if (ring) {
+    const spikes = ring.angles
+      .map(
+        (deg) =>
+          `<path d="${ring.petal}" transform="rotate(${deg} 20 20)" fill="url(#g-${uid})" stroke="${strokeColor}" stroke-width="0.5"/>`
+      )
+      .join("");
     shapeMarkup = `
       <g filter="url(#sh-${uid})">
-        <circle cx="20" cy="20" r="13" fill="url(#g-${uid})" stroke="${strokeColor}" stroke-width="1.6"/>
+        <circle cx="20" cy="20" r="${ring.r}" fill="url(#g-${uid})" stroke="${strokeColor}" stroke-width="1.6"/>
         ${spikes}
       </g>
-      <circle cx="20" cy="20" r="13" fill="url(#hl-${uid})"/>
+      <circle cx="20" cy="20" r="${ring.r}" fill="url(#hl-${uid})"/>
     `;
   } else {
     const d = SHAPES[badge.shape] || SHAPES.hexagon;
@@ -219,7 +325,10 @@ export function renderBadgeIconSvg(badge, opts = {}) {
     `;
   }
 
-  return `<svg viewBox="0 0 40 40" width="${size}" height="${size}" class="badge-svg"><defs>${defs}</defs>${shapeMarkup}${renderCenterContent(badge)}</svg>`;
+  const medalInner = `<svg viewBox="0 0 40 40" width="100%" height="100%"><defs>${defs}</defs>${shapeMarkup}${renderCenterContent(badge)}</svg>`;
+  const sparkle = badge.tier >= 4 ? `<path d="${SPARKLE_GEM_D}" fill="#fff" opacity="0.9"/>` : "";
+
+  return `<svg viewBox="0 0 60 60" width="${size}" height="${size}" class="badge-svg">${ribbonMarkup(color)}<svg x="7" y="0" width="46" height="46">${medalInner}</svg>${sparkle}</svg>`;
 }
 
 /* 미달성 뱃지의 모달용 진행률 문구 ("23 / 50km" 등) */
@@ -341,6 +450,9 @@ function byDateThenId(a, b) {
   if (a.date > b.date) return 1;
   return (a.id ?? 0) - (b.id ?? 0);
 }
+function daysBetween(dateStrA, dateStrB) {
+  return Math.round((parseDate(dateStrB) - parseDate(dateStrA)) / 86400000);
+}
 
 /* ---------------- 시계열 포인트 계산 헬퍼 ---------------- */
 function firstReaching(points, threshold) {
@@ -382,6 +494,9 @@ function computeGroupedCounts(datesSorted, keyFn) {
   return results;
 }
 function computeWeeklyQualifyingStreak(datesSorted, minPerWeek) {
+  return computeWeeklyStreakByPredicate(datesSorted, (days) => days.length >= minPerWeek);
+}
+function computeWeeklyStreakByPredicate(datesSorted, predicateFn) {
   const weekMap = new Map();
   for (const date of datesSorted) {
     const wk = weekKeyOf(date);
@@ -394,7 +509,7 @@ function computeWeeklyQualifyingStreak(datesSorted, minPerWeek) {
   let prevKey = null;
   for (const wk of weekKeysSorted) {
     const daysInWeek = weekMap.get(wk);
-    if (daysInWeek.length < minPerWeek) {
+    if (!predicateFn(daysInWeek)) {
       streak = 0;
       prevKey = null;
       continue;
@@ -472,9 +587,101 @@ function computeAbstinenceStreakPoints(drinkDatesSorted, earliestDate, todayStr)
   }
   return points;
 }
+function computeDailyTotals(logsSorted, valueFn) {
+  const order = [];
+  const map = new Map();
+  for (const log of logsSorted) {
+    if (!map.has(log.date)) {
+      map.set(log.date, 0);
+      order.push(log.date);
+    }
+    map.set(log.date, map.get(log.date) + valueFn(log));
+  }
+  return order.map((date) => ({ date, value: map.get(date) }));
+}
+function computeDistinctCumulative(logsSorted, keyFn) {
+  const seen = new Set();
+  const points = [];
+  for (const log of logsSorted) {
+    const key = keyFn(log);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      points.push({ date: log.date, value: seen.size });
+    }
+  }
+  return points;
+}
+function computeMonthlyResetTotals(logsSorted, valueFn) {
+  const points = [];
+  let curMonth = null;
+  let cum = 0;
+  for (const log of logsSorted) {
+    const month = log.date.slice(0, 7);
+    if (month !== curMonth) {
+      curMonth = month;
+      cum = 0;
+    }
+    cum += valueFn(log);
+    points.push({ date: log.date, value: cum });
+  }
+  return points;
+}
+function countStreakCompletions(streakPoints, threshold) {
+  const results = [];
+  let count = 0;
+  let wasBelow = true;
+  for (const p of streakPoints) {
+    if (p.value >= threshold) {
+      if (wasBelow) {
+        count++;
+        results.push({ date: p.date, value: count });
+      }
+      wasBelow = false;
+    } else {
+      wasBelow = true;
+    }
+  }
+  return results;
+}
+function computeYearMonthMilestone(datesSorted, months, threshold) {
+  const byYear = new Map();
+  let achievedDate = null;
+  let bestCount = 0;
+  for (const d of datesSorted) {
+    const mm = Number(d.slice(5, 7));
+    if (!months.includes(mm)) continue;
+    const yyyy = d.slice(0, 4);
+    const count = (byYear.get(yyyy) || 0) + 1;
+    byYear.set(yyyy, count);
+    bestCount = Math.max(bestCount, count);
+    if (!achievedDate && count >= threshold) achievedDate = d;
+  }
+  return { achievedDate, bestCount };
+}
+function computeStreakRuns(datesSorted) {
+  const runs = [];
+  let runStart = null;
+  let prev = null;
+  for (const d of datesSorted) {
+    if (!(prev && isNextDay(prev, d))) {
+      if (runStart) runs.push({ start: runStart, end: prev });
+      runStart = d;
+    }
+    prev = d;
+  }
+  if (runStart) runs.push({ start: runStart, end: prev });
+  return runs;
+}
+function seasonOf(dateStr) {
+  const m = Number(dateStr.slice(5, 7));
+  if (m >= 3 && m <= 5) return "spring";
+  if (m >= 6 && m <= 8) return "summer";
+  if (m >= 9 && m <= 11) return "fall";
+  return "winter";
+}
 
 /* ---------------- 데이터 준비 ---------------- */
-function prepare({ workoutLogs, inbodyRecords, drinkLogs }) {
+function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals }) {
   const weightLogs = workoutLogs.filter((l) => l.type === "weight").slice().sort(byDateThenId);
   const runningLogs = workoutLogs.filter((l) => l.type === "running").slice().sort(byDateThenId);
   const stairLogs = workoutLogs.filter((l) => l.type === "stairmaster").slice().sort(byDateThenId);
@@ -495,19 +702,243 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs }) {
   ];
   const earliestDate = allDates.length ? allDates.reduce((min, d) => (d < min ? d : min)) : null;
 
+  /* ---- 신규 50개용 계산 ---- */
+  const logsWithTime = workoutLogs.filter((l) => l.createdAt).slice().sort((a, b) => a.createdAt - b.createdAt);
+  const runsWithTime = logsWithTime.filter((l) => l.type === "running");
+  const dawnLog = logsWithTime.find((l) => new Date(l.createdAt).getHours() < 6);
+  const nightLog = logsWithTime.find((l) => new Date(l.createdAt).getHours() >= 22);
+  const lunchRunLog = runsWithTime.find((l) => {
+    const h = new Date(l.createdAt).getHours();
+    return h >= 12 && h < 14;
+  });
+
+  const weekendStreakPoints = computeWeeklyStreakByPredicate(allWorkoutDatesSorted, (days) =>
+    days.some((d) => [0, 6].includes(parseDate(d).getDay()))
+  );
+  const mondayStreakPoints = computeWeeklyStreakByPredicate(allWorkoutDatesSorted, (days) =>
+    days.some((d) => parseDate(d).getDay() === 1)
+  );
+  const mondayDatesSorted = allWorkoutDatesSorted.filter((d) => parseDate(d).getDay() === 1);
+  const fridayDatesSorted = allWorkoutDatesSorted.filter((d) => parseDate(d).getDay() === 5);
+
+  const nonRoutineLogsSorted = allLogsSorted.filter((l) => l.fromRoutine !== true);
+
+  const routinesSorted = routines.slice().sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  const memosSorted = memos.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  const firstWorkoutDate = allWorkoutDatesSorted[0] || null;
+  const within30OfFirst = firstWorkoutDate
+    ? allWorkoutDatesSorted.filter((d) => d < addDaysStr(firstWorkoutDate, 30))
+    : [];
+
+  let changeBeginsDate = null;
+  if (inbodySorted.length >= 3) {
+    const baseline = inbodySorted[0].weight;
+    for (let i = 2; i < inbodySorted.length; i++) {
+      if (inbodySorted[i].weight != null && baseline != null && inbodySorted[i].weight !== baseline) {
+        changeBeginsDate = inbodySorted[i].date;
+        break;
+      }
+    }
+  }
+
+  const totalWorkoutSpanDays = firstWorkoutDate
+    ? daysBetween(firstWorkoutDate, allWorkoutDatesSorted[allWorkoutDatesSorted.length - 1])
+    : 0;
+  function spanAchievedDate(spanDays) {
+    if (!firstWorkoutDate) return null;
+    const target = addDaysStr(firstWorkoutDate, spanDays);
+    return allWorkoutDatesSorted.find((d) => d >= target) || null;
+  }
+
+  let allSeasonsDate = null;
+  {
+    const seen = new Set();
+    for (const d of allWorkoutDatesSorted) {
+      seen.add(seasonOf(d));
+      if (seen.size === 4) {
+        allSeasonsDate = d;
+        break;
+      }
+    }
+  }
+
+  let allRounderDate = null;
+  {
+    const seenTypes = new Set();
+    for (const log of allLogsSorted) {
+      seenTypes.add(log.type);
+      if (seenTypes.has("weight") && seenTypes.has("running") && seenTypes.has("stairmaster")) {
+        allRounderDate = log.date;
+        break;
+      }
+    }
+  }
+
+  const bodyProjectDone = !!(goals?.targetWeight && goals?.targetBodyFat && goals?.targetMuscleMass);
+
+  const totalSetCountPoints = computeCumulativePoints(weightLogs, (l) => l.sets.length);
+  const noneSetCumulative = computeCumulativePoints(weightLogs, (l) => l.sets.filter((s) => s.unit === "none").length);
+  const dailySetTotals = computeDailyTotals(weightLogs, (l) => l.sets.length);
+  const dailyVolumeTotals = computeDailyTotals(weightLogs, (l) => calcLogVolume(l));
+  const distinctEquipmentPoints = computeDistinctCumulative(weightLogs, (l) => l.equipmentName);
+
+  let allInDate = null;
+  {
+    const byDate = new Map();
+    for (const log of allLogsSorted) {
+      if (!byDate.has(log.date)) byDate.set(log.date, new Set());
+      byDate.get(log.date).add(log.type === "weight" ? "weight" : log.type === "running" || log.type === "stairmaster" ? "cardio" : null);
+    }
+    for (const [date, types] of byDate) {
+      if (types.has("weight") && types.has("cardio")) {
+        allInDate = date;
+        break;
+      }
+    }
+  }
+
+  const dailyStreakPoints = computeStreakAchievements(allWorkoutDatesSorted);
+  const streak7Completions = countStreakCompletions(dailyStreakPoints, 7);
+  const monthlyCalorieTotals = computeMonthlyResetTotals(allLogsSorted, (l) => calcLogCalories(l, bodyWeightKg));
+
+  let muscleEvangelistDate = null;
+  if (inbodySorted.length >= 2) {
+    const baseMuscle = inbodySorted[0].muscleMass;
+    const baseFat = inbodySorted[0].bodyFat;
+    for (let i = 1; i < inbodySorted.length; i++) {
+      const r = inbodySorted[i];
+      if (
+        r.muscleMass != null &&
+        r.bodyFat != null &&
+        baseMuscle != null &&
+        baseFat != null &&
+        r.muscleMass > baseMuscle &&
+        r.bodyFat < baseFat
+      ) {
+        muscleEvangelistDate = r.date;
+        break;
+      }
+    }
+  }
+
+  let perfectWeekDate = null;
+  {
+    const events = [
+      ...weightLogs.map((l) => ({ date: l.date, kind: "weight" })),
+      ...runningLogs.map((l) => ({ date: l.date, kind: "running" })),
+      ...proteinDatesSorted.map((d) => ({ date: d, kind: "protein" })),
+    ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const weekHas = new Map();
+    for (const ev of events) {
+      const wk = weekKeyOf(ev.date);
+      if (!weekHas.has(wk)) weekHas.set(wk, new Set());
+      weekHas.get(wk).add(ev.kind);
+      if (weekHas.get(wk).size === 3) {
+        perfectWeekDate = ev.date;
+        break;
+      }
+    }
+  }
+
+  const monthlyRunDistanceTotals = computeMonthlyResetTotals(runningLogs, (l) => l.distance);
+  const newYearMilestone = computeYearMonthMilestone(allWorkoutDatesSorted, [1], 10);
+  const summerMilestone = computeYearMonthMilestone(allWorkoutDatesSorted, [6, 7, 8], 20);
+  const winterMilestone = computeYearMonthMilestone(allWorkoutDatesSorted, [12, 1, 2], 15);
+
+  const workoutRuns = computeStreakRuns(allWorkoutDatesSorted);
+  function runLengthDays(run) {
+    return daysBetween(run.start, run.end) + 1;
+  }
+  let threeDayMonkDate = null;
+  for (let i = 0; i < workoutRuns.length; i++) {
+    const run = workoutRuns[i];
+    if (runLengthDays(run) < 3) continue;
+    const nextRun = workoutRuns[i + 1];
+    const gapEndDate = nextRun ? nextRun.start : todayStr;
+    const gapDays = daysBetween(run.end, gapEndDate);
+    if (gapDays >= 4) {
+      threeDayMonkDate = run.end;
+      break;
+    }
+  }
+
+  let comebackDate = null;
+  for (let i = 1; i < allWorkoutDatesSorted.length; i++) {
+    if (daysBetween(allWorkoutDatesSorted[i - 1], allWorkoutDatesSorted[i]) >= 7) {
+      comebackDate = allWorkoutDatesSorted[i];
+      break;
+    }
+  }
+
+  let perfectionistDate = null;
+  {
+    const byEquipment = new Map();
+    for (const log of weightLogs) {
+      const key = log.equipmentName || "";
+      if (!byEquipment.has(key)) byEquipment.set(key, new Set());
+      byEquipment.get(key).add(log.date);
+    }
+    for (const dateSet of byEquipment.values()) {
+      const datesSorted = [...dateSet].sort();
+      const hit = firstReaching(computeStreakAchievements(datesSorted), 5);
+      if (hit && (!perfectionistDate || hit < perfectionistDate)) perfectionistDate = hit;
+    }
+  }
+
+  const slowPaceRuns = runningLogs.filter((l) => l.pace >= 6);
+
+  let tooHeavyDate = null;
+  outerHeavy: for (const log of weightLogs) {
+    for (const s of log.sets) {
+      if (s.unit !== "none" && toKg(s) >= 100) {
+        tooHeavyDate = log.date;
+        break outerHeavy;
+      }
+    }
+  }
+
+  let surprisePrDate = null;
+  {
+    const maxByEquip = new Map();
+    for (const log of weightLogs) {
+      const weights = log.sets.filter((s) => s.unit !== "none").map(toKg);
+      if (!weights.length) continue;
+      const logMax = Math.max(...weights);
+      const key = log.equipmentName || "";
+      const prevMax = maxByEquip.get(key);
+      if (prevMax !== undefined && logMax - prevMax >= 10) {
+        surprisePrDate = log.date;
+        break;
+      }
+      if (prevMax === undefined || logMax > prevMax) maxByEquip.set(key, logMax);
+    }
+  }
+
+  let restMattersDate = null;
+  for (let i = 0; i < allWorkoutDatesSorted.length - 1; i++) {
+    if (!isNextDay(allWorkoutDatesSorted[i], allWorkoutDatesSorted[i + 1])) {
+      restMattersDate = addDaysStr(allWorkoutDatesSorted[i], 1);
+      break;
+    }
+  }
+
+  const turtleStreakPoints = computeWeeklyQualifyingStreak(allWorkoutDatesSorted, 1);
+
   return {
     weightLogs,
     runningLogs,
     stairLogs,
     allWorkoutDatesSorted,
     inbodySorted,
+    todayStr,
 
     prEvents: computeAllPrEvents(weightLogs),
     benchMaxPoints: computeRunningMaxByKeywords(weightLogs, ["벤치프레스", "벤치"]),
     squatMaxPoints: computeRunningMaxByKeywords(weightLogs, ["스쿼트"]),
     deadliftMaxPoints: computeRunningMaxByKeywords(weightLogs, ["데드리프트", "데드"]),
 
-    dailyStreak: computeStreakAchievements(allWorkoutDatesSorted),
+    dailyStreak: dailyStreakPoints,
     weeklyCounts: computeGroupedCounts(allWorkoutDatesSorted, weekKeyOf),
     monthlyCounts: computeGroupedCounts(allWorkoutDatesSorted, (d) => d.slice(0, 7)),
     weeklyStreak3: computeWeeklyQualifyingStreak(allWorkoutDatesSorted, 3),
@@ -526,6 +957,48 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs }) {
 
     cumulativeVolume: computeCumulativePoints(weightLogs, (l) => calcLogVolume(l)),
     cumulativeCalories: computeCumulativePoints(allLogsSorted, (l) => calcLogCalories(l, bodyWeightKg)),
+
+    /* 신규 */
+    dawnLog,
+    nightLog,
+    lunchRunLog,
+    weekendStreakPoints,
+    mondayStreakPoints,
+    mondayDatesSorted,
+    fridayDatesSorted,
+    nonRoutineLogsSorted,
+    routinesSorted,
+    memosSorted,
+    firstWorkoutDate,
+    within30OfFirst,
+    changeBeginsDate,
+    totalWorkoutSpanDays,
+    spanAchievedDate,
+    allSeasonsDate,
+    allRounderDate,
+    bodyProjectDone,
+    totalSetCountPoints,
+    noneSetCumulative,
+    dailySetTotals,
+    dailyVolumeTotals,
+    distinctEquipmentPoints,
+    allInDate,
+    streak7Completions,
+    monthlyCalorieTotals,
+    muscleEvangelistDate,
+    perfectWeekDate,
+    monthlyRunDistanceTotals,
+    newYearMilestone,
+    summerMilestone,
+    winterMilestone,
+    threeDayMonkDate,
+    comebackDate,
+    perfectionistDate,
+    slowPaceRuns,
+    tooHeavyDate,
+    surprisePrDate,
+    restMattersDate,
+    turtleStreakPoints,
   };
 }
 
@@ -964,16 +1437,561 @@ function buildBadges(data) {
     });
   });
 
-  return finalize(list);
+  /* ============ 🎭 운동 스타일 & 개성 (10개, 로제트형) ============ */
+  list.push({
+    id: "style-dawn",
+    category: "style",
+    tier: 1,
+    glyph: "sunrise",
+    name: "새벽반",
+    description: "오전 6시 이전에 운동을 기록했어요",
+    achievedDate: data.dawnLog ? data.dawnLog.date : null,
+  });
+  list.push({
+    id: "style-night-owl",
+    category: "style",
+    tier: 5,
+    glyph: "moon",
+    name: "야행성",
+    description: "오후 10시 이후에 운동을 기록했어요",
+    achievedDate: data.nightLog ? data.nightLog.date : null,
+  });
+  list.push({
+    id: "style-weekend-warrior",
+    category: "style",
+    tier: 3,
+    glyph: "flag",
+    centerLabel: "5",
+    subLabel: "WEEKS",
+    name: "주말전사",
+    description: "주말이 낀 주를 5주 연속으로 운동했어요",
+    achievedDate: firstReaching(data.weekendStreakPoints, 5),
+    progress: progressFromPoints(data.weekendStreakPoints, 5, "주"),
+  });
+  list.push({
+    id: "style-lunch-runner",
+    category: "style",
+    tier: 2,
+    glyph: "sunNoon",
+    name: "점심러너",
+    description: "낮 12~2시 사이에 러닝을 기록했어요",
+    achievedDate: data.lunchRunLog ? data.lunchRunLog.date : null,
+  });
+  list.push({
+    id: "style-rain-or-shine",
+    category: "style",
+    tier: 1,
+    glyph: "raindrop",
+    name: "비가 와도",
+    description: "날씨와 상관없이 운동을 기록했어요",
+    achievedDate: data.allWorkoutDatesSorted.length ? data.allWorkoutDatesSorted[0] : null,
+  });
+  list.push({
+    id: "style-monday-slayer",
+    category: "style",
+    tier: 2,
+    glyph: "calendar",
+    centerLabel: "10",
+    subLabel: "MON",
+    name: "월요병 극복",
+    description: "월요일에 10회 운동했어요",
+    achievedDate: findNthDate(data.mondayDatesSorted, 10),
+    progress: progressFromCount(data.mondayDatesSorted.length, 10, "회"),
+  });
+  list.push({
+    id: "style-tgif",
+    category: "style",
+    tier: 2,
+    glyph: "flame",
+    centerLabel: "10",
+    subLabel: "FRI",
+    name: "불금 운동",
+    description: "금요일에 10회 운동했어요",
+    achievedDate: findNthDate(data.fridayDatesSorted, 10),
+    progress: progressFromCount(data.fridayDatesSorted.length, 10, "회"),
+  });
+  list.push({
+    id: "style-solo-fighter",
+    category: "style",
+    tier: 3,
+    glyph: "dumbbell",
+    centerLabel: "30",
+    subLabel: "회",
+    name: "혼자서도 잘해요",
+    description: "루틴 없이 직접 운동을 30회 기록했어요",
+    achievedDate: data.nonRoutineLogsSorted.length >= 30 ? data.nonRoutineLogsSorted[29].date : null,
+    progress: progressFromCount(data.nonRoutineLogsSorted.length, 30, "회"),
+  });
+  list.push({
+    id: "style-planner",
+    category: "style",
+    tier: 2,
+    glyph: "checklist",
+    centerLabel: "5",
+    subLabel: "루틴",
+    name: "계획형 인간",
+    description: "루틴을 5개 저장했어요",
+    achievedDate:
+      data.routinesSorted.length >= 5
+        ? data.routinesSorted[4].createdAt
+          ? formatDateObj(new Date(data.routinesSorted[4].createdAt))
+          : data.todayStr
+        : null,
+    progress: progressFromCount(data.routinesSorted.length, 5, "개"),
+  });
+  list.push({
+    id: "style-record-keeper",
+    category: "style",
+    tier: 3,
+    glyph: "pencil",
+    centerLabel: "50",
+    subLabel: "메모",
+    name: "기록왕",
+    description: "운동 메모를 50회 작성했어요",
+    achievedDate: data.memosSorted.length >= 50 ? data.memosSorted[49].date : null,
+    progress: progressFromCount(data.memosSorted.length, 50, "회"),
+  });
+
+  /* ============ 💫 특별한 순간 (10개, 선버스트형) ============ */
+  list.push({
+    id: "special-first-step",
+    category: "special",
+    tier: 2,
+    glyph: "footprint",
+    name: "첫 발걸음",
+    description: "앱에 첫 운동 기록을 남겼어요",
+    achievedDate: data.firstWorkoutDate,
+  });
+  list.push({
+    id: "special-miracle-month",
+    category: "special",
+    tier: 3,
+    glyph: "sparkle",
+    centerLabel: "10",
+    subLabel: "30일",
+    name: "한 달의 기적",
+    description: "첫 운동 후 30일 안에 10회를 달성했어요",
+    achievedDate: data.within30OfFirst.length >= 10 ? data.within30OfFirst[9] : null,
+    progress: progressFromCount(data.within30OfFirst.length, 10, "회"),
+  });
+  list.push({
+    id: "special-change-begins",
+    category: "special",
+    tier: 2,
+    glyph: "scale",
+    name: "변화의 시작",
+    description: "인바디 3회 이상 기록 후 체중 변화가 감지됐어요",
+    achievedDate: data.changeBeginsDate,
+  });
+  list.push({
+    id: "special-consistency-90",
+    category: "special",
+    tier: 3,
+    glyph: "calendar",
+    centerLabel: "90",
+    subLabel: "일",
+    name: "꾸준함의 힘",
+    description: "운동 기록이 90일 동안 이어졌어요",
+    achievedDate: data.spanAchievedDate(90),
+    progress: { current: data.totalWorkoutSpanDays, target: 90, unit: "일" },
+  });
+  list.push({
+    id: "special-half-year",
+    category: "special",
+    tier: 4,
+    glyph: "calendar",
+    centerLabel: "180",
+    subLabel: "일",
+    name: "반년의 여정",
+    description: "운동 기록이 180일 동안 이어졌어요",
+    achievedDate: data.spanAchievedDate(180),
+    progress: { current: data.totalWorkoutSpanDays, target: 180, unit: "일" },
+  });
+  list.push({
+    id: "special-year-miracle",
+    category: "special",
+    tier: 5,
+    glyph: "trophy",
+    centerLabel: "365",
+    subLabel: "일",
+    name: "1년의 기적",
+    description: "운동 기록이 365일 동안 이어졌어요",
+    achievedDate: data.spanAchievedDate(365),
+    progress: { current: data.totalWorkoutSpanDays, target: 365, unit: "일" },
+  });
+  list.push({
+    id: "special-all-seasons",
+    category: "special",
+    tier: 4,
+    glyph: "seasons",
+    name: "계절을 넘어",
+    description: "봄, 여름, 가을, 겨울 모두 운동을 기록했어요",
+    achievedDate: data.allSeasonsDate,
+  });
+  list.push({
+    id: "special-all-rounder",
+    category: "special",
+    tier: 3,
+    glyph: "starGlyph",
+    name: "올라운더",
+    description: "웨이트, 러닝, 천국의계단을 모두 기록했어요",
+    achievedDate: data.allRounderDate,
+  });
+  list.push({
+    id: "special-body-project",
+    category: "special",
+    tier: 2,
+    glyph: "target",
+    name: "몸짱 프로젝트",
+    description: "목표 체중, 체지방, 근육량을 모두 설정했어요",
+    achievedDate: data.bodyProjectDone ? data.todayStr : null,
+  });
+  list.push({
+    id: "special-data-geek",
+    category: "special",
+    tier: 1,
+    glyph: "chart",
+    centerLabel: "10",
+    subLabel: "회",
+    name: "데이터 덕후",
+    description: "인바디를 10회 이상 기록했어요",
+    achievedDate: data.inbodySorted.length >= 10 ? data.inbodySorted[9].date : null,
+    progress: progressFromCount(data.inbodySorted.length, 10, "회"),
+  });
+
+  /* ============ 🏋️ 운동량 마일스톤 (10개, 팔각형) ============ */
+  list.push({
+    id: "milestone-first-set",
+    category: "milestone",
+    tier: 0,
+    glyph: "dumbbell",
+    name: "첫 세트",
+    description: "첫 웨이트 세트를 기록했어요",
+    achievedDate: data.weightLogs.length ? data.weightLogs[0].date : null,
+  });
+  [100, 1000, 5000].forEach((t, i) => {
+    list.push({
+      id: `milestone-set-${t}`,
+      category: "milestone",
+      tier: [1, 3, 5][i],
+      glyph: "dumbbell",
+      centerLabel: `${t}`,
+      subLabel: "SET",
+      name: `${t}세트`,
+      description: `누적 세트 ${t}개를 달성했어요`,
+      achievedDate: firstReaching(data.totalSetCountPoints, t),
+      progress: progressFromPoints(data.totalSetCountPoints, t, "세트"),
+    });
+  });
+  list.push({
+    id: "milestone-daily-10-sets",
+    category: "milestone",
+    tier: 2,
+    glyph: "dumbbell",
+    centerLabel: "10",
+    subLabel: "일일",
+    name: "오늘만큼은",
+    description: "하루에 10세트 이상 기록했어요",
+    achievedDate: firstReaching(data.dailySetTotals, 10),
+    progress: progressFromPoints(data.dailySetTotals, 10, "세트"),
+  });
+  list.push({
+    id: "milestone-volume-king",
+    category: "milestone",
+    tier: 2,
+    glyph: "boltGlyph",
+    centerLabel: "5t",
+    subLabel: "일일",
+    name: "볼륨킹",
+    description: "하루 총 볼륨 5,000kg 이상을 기록했어요",
+    achievedDate: firstReaching(data.dailyVolumeTotals, 5000),
+    progress: progressFromPoints(data.dailyVolumeTotals, 5000, "kg"),
+  });
+  list.push({
+    id: "milestone-super-volume",
+    category: "milestone",
+    tier: 4,
+    glyph: "boltGlyph",
+    centerLabel: "10t",
+    subLabel: "일일",
+    name: "슈퍼볼륨",
+    description: "하루 총 볼륨 10,000kg 이상을 기록했어요",
+    achievedDate: firstReaching(data.dailyVolumeTotals, 10000),
+    progress: progressFromPoints(data.dailyVolumeTotals, 10000, "kg"),
+  });
+  list.push({
+    id: "milestone-muscle-factory",
+    category: "milestone",
+    tier: 2,
+    glyph: "muscle",
+    centerLabel: "10",
+    subLabel: "종류",
+    name: "근육공장",
+    description: "웨이트 운동 종류 10가지 이상을 기록했어요",
+    achievedDate: firstReaching(data.distinctEquipmentPoints, 10),
+    progress: progressFromPoints(data.distinctEquipmentPoints, 10, "가지"),
+  });
+  list.push({
+    id: "milestone-equipment-master",
+    category: "milestone",
+    tier: 3,
+    glyph: "dumbbell",
+    centerLabel: "20",
+    subLabel: "기구",
+    name: "기구마스터",
+    description: "20가지 이상 다른 기구를 사용했어요",
+    achievedDate: firstReaching(data.distinctEquipmentPoints, 20),
+    progress: progressFromPoints(data.distinctEquipmentPoints, 20, "가지"),
+  });
+  list.push({
+    id: "milestone-all-in",
+    category: "milestone",
+    tier: 3,
+    glyph: "heartbeat",
+    name: "올인",
+    description: "하루에 웨이트와 유산소를 모두 기록했어요",
+    achievedDate: data.allInDate,
+  });
+
+  /* ============ 🌟 챌린지 (10개, 크레스트형) ============ */
+  list.push({
+    id: "challenge-30-days",
+    category: "challenge",
+    tier: 4,
+    glyph: "flame",
+    centerLabel: "30",
+    subLabel: "DAYS",
+    name: "30일 챌린지",
+    description: "30일 동안 매일 운동을 기록했어요",
+    achievedDate: firstReaching(data.dailyStreak, 30),
+    progress: progressFromPoints(data.dailyStreak, 30, "일"),
+  });
+  list.push({
+    id: "challenge-no-pain-no-gain",
+    category: "challenge",
+    tier: 3,
+    glyph: "muscle",
+    centerLabel: "3",
+    subLabel: "×7일",
+    name: "노페인노게인",
+    description: "연속 7일 운동을 3번 달성했어요",
+    achievedDate: firstReaching(data.streak7Completions, 3),
+    progress: progressFromPoints(data.streak7Completions, 3, "회"),
+  });
+  list.push({
+    id: "challenge-fat-burner",
+    category: "challenge",
+    tier: 3,
+    glyph: "bodyfatDrop",
+    centerLabel: "10k",
+    subLabel: "KCAL",
+    name: "체지방버너",
+    description: "한 달 누적 칼로리 소모 10,000kcal을 달성했어요",
+    achievedDate: firstReaching(data.monthlyCalorieTotals, 10000),
+    progress: progressFromPoints(data.monthlyCalorieTotals, 10000, "kcal"),
+  });
+  list.push({
+    id: "challenge-muscle-evangelist",
+    category: "challenge",
+    tier: 4,
+    glyph: "muscle",
+    name: "근육전도사",
+    description: "골격근량 증가와 체지방 감소를 동시에 달성했어요",
+    achievedDate: data.muscleEvangelistDate,
+  });
+  list.push({
+    id: "challenge-perfect-week",
+    category: "challenge",
+    tier: 3,
+    glyph: "checklist",
+    name: "퍼펙트위크",
+    description: "한 주에 웨이트, 러닝, 프로틴을 모두 기록했어요",
+    achievedDate: data.perfectWeekDate,
+  });
+  list.push({
+    id: "challenge-iron-will",
+    category: "challenge",
+    tier: 4,
+    glyph: "calendar",
+    centerLabel: "4",
+    subLabel: "WEEKS",
+    name: "철의 의지",
+    description: "운동하기 싫은 월요일에 4주 연속 운동했어요",
+    achievedDate: firstReaching(data.mondayStreakPoints, 4),
+    progress: progressFromPoints(data.mondayStreakPoints, 4, "주"),
+  });
+  list.push({
+    id: "challenge-speed-runner",
+    category: "challenge",
+    tier: 3,
+    glyph: "shoe",
+    centerLabel: "100",
+    subLabel: "km",
+    name: "스피드러너",
+    description: "한 달 러닝 100km를 달성했어요",
+    achievedDate: firstReaching(data.monthlyRunDistanceTotals, 100),
+    progress: progressFromPoints(data.monthlyRunDistanceTotals, 100, "km"),
+  });
+  list.push({
+    id: "challenge-new-year",
+    category: "challenge",
+    tier: 2,
+    glyph: "sparkle",
+    centerLabel: "10",
+    subLabel: "1월",
+    name: "새해결심",
+    description: "1월에 10회 이상 운동했어요",
+    achievedDate: data.newYearMilestone.achievedDate,
+    progress: { current: data.newYearMilestone.bestCount, target: 10, unit: "회" },
+  });
+  list.push({
+    id: "challenge-summer-ready",
+    category: "challenge",
+    tier: 2,
+    glyph: "sunNoon",
+    centerLabel: "20",
+    subLabel: "여름",
+    name: "여름준비",
+    description: "6~8월 중 한 달 20회 이상 운동했어요",
+    achievedDate: data.summerMilestone.achievedDate,
+    progress: { current: data.summerMilestone.bestCount, target: 20, unit: "회" },
+  });
+  list.push({
+    id: "challenge-winter-overcome",
+    category: "challenge",
+    tier: 2,
+    glyph: "snowflake",
+    centerLabel: "15",
+    subLabel: "겨울",
+    name: "겨울극복",
+    description: "12~2월 중 한 달 15회 이상 운동했어요",
+    achievedDate: data.winterMilestone.achievedDate,
+    progress: { current: data.winterMilestone.bestCount, target: 15, unit: "회" },
+  });
+
+  /* ============ 🎪 유머 / 숨겨진 뱃지 (10개, 실형) ============ */
+  list.push({
+    id: "hidden-three-day-monk",
+    category: "hidden",
+    tier: 1,
+    glyph: "flame",
+    name: "작심삼일",
+    description: "그 불타던 의지, 어디로 갔을까요? (실패해도 괜찮아요!)",
+    achievedDate: data.threeDayMonkDate,
+  });
+  list.push({
+    id: "hidden-comeback",
+    category: "hidden",
+    tier: 2,
+    glyph: "footprint",
+    name: "다시 시작",
+    description: "오랜만이에요! 돌아온 당신을 응원해요",
+    achievedDate: data.comebackDate,
+  });
+  list.push({
+    id: "hidden-perfectionist",
+    category: "hidden",
+    tier: 3,
+    glyph: "checklist",
+    name: "완벽주의자",
+    description: "한 가지에 꽂히면 끝을 보는 타입이군요",
+    achievedDate: data.perfectionistDate,
+  });
+  list.push({
+    id: "hidden-slow-is-ok",
+    category: "hidden",
+    tier: 1,
+    glyph: "shoe",
+    name: "천천히 가도 돼",
+    description: "속도보다 중요한 건 완주예요",
+    achievedDate: data.slowPaceRuns.length >= 10 ? data.slowPaceRuns[9].date : null,
+    progress: progressFromCount(data.slowPaceRuns.length, 10, "회"),
+  });
+  list.push({
+    id: "hidden-bodyweight-only",
+    category: "hidden",
+    tier: 2,
+    glyph: "muscle",
+    name: "저도 몰랐어요",
+    description: "맨몸으로도 이렇게 할 수 있다니",
+    achievedDate: firstReaching(data.noneSetCumulative, 30),
+    progress: progressFromPoints(data.noneSetCumulative, 30, "세트"),
+  });
+  list.push({
+    id: "hidden-too-heavy",
+    category: "hidden",
+    tier: 3,
+    glyph: "dumbbell",
+    name: "무거워",
+    description: "이 정도면 인간계 최강 아닌가요?",
+    achievedDate: data.tooHeavyDate,
+  });
+  list.push({
+    id: "hidden-surprise-pr",
+    category: "hidden",
+    tier: 4,
+    glyph: "sparkle",
+    name: "깜짝 놀랐지",
+    description: "갑자기 확 늘어난 그 순간",
+    achievedDate: data.surprisePrDate,
+  });
+  list.push({
+    id: "hidden-rest-matters",
+    category: "hidden",
+    tier: 0,
+    glyph: "moon",
+    name: "오늘은 쉬어요",
+    description: "쉬는 것도 훈련의 일부예요",
+    achievedDate: data.restMattersDate,
+  });
+  list.push({
+    id: "hidden-steady-turtle",
+    category: "hidden",
+    tier: 4,
+    glyph: "turtle",
+    centerLabel: "26",
+    subLabel: "WEEKS",
+    name: "꾸준한 거북이",
+    description: "느려도 꾸준하면 결국 도착해요",
+    achievedDate: firstReaching(data.turtleStreakPoints, 26),
+    progress: progressFromPoints(data.turtleStreakPoints, 26, "주"),
+  });
+  list.push({
+    id: "hidden-legend-begins",
+    category: "hidden",
+    tier: 5,
+    glyph: "trophy",
+    name: "전설의 시작",
+    description: "당신은 이미 많은 걸 해냈어요",
+    achievedDate: null, // buildBadges() 마지막에 별도 계산
+  });
+
+  return list;
 }
 
 /* ---------------- 엔트리 포인트 ---------------- */
 export async function evaluateAllBadges() {
-  const [workoutLogs, inbodyRecords, drinkLogs] = await Promise.all([
+  const [workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals] = await Promise.all([
     db.getAllWorkoutLogs(),
     db.getAllInbodyRecords(),
     db.getAllDrinkLogs(),
+    db.getRoutines(),
+    db.getAllWorkoutMemos(),
+    db.getSetting("fitnessGoals", null),
   ]);
-  const data = prepare({ workoutLogs, inbodyRecords, drinkLogs });
-  return buildBadges(data);
+  const data = prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals });
+  const list = buildBadges(data);
+
+  // "전설의 시작"은 다른 149개 뱃지 중 50개를 달성한 시점을 가리키는 메타 뱃지
+  const legend = list.find((b) => b.id === "hidden-legend-begins");
+  if (legend) {
+    const otherAchievedDates = list
+      .filter((b) => b.id !== "hidden-legend-begins" && b.achievedDate)
+      .map((b) => b.achievedDate)
+      .sort();
+    legend.achievedDate = otherAchievedDates.length >= 50 ? otherAchievedDates[49] : null;
+    legend.progress = progressFromCount(otherAchievedDates.length, 50, "개");
+  }
+
+  return finalize(list);
 }

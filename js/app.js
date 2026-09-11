@@ -1,6 +1,6 @@
 import * as db from "./db.js";
 import { drawLineChart } from "./chart.js";
-import { evaluateAllBadges, renderBadgeIconSvg, formatProgressText, BADGE_CATEGORIES } from "./badges.js";
+import { evaluateAllBadges, renderBadgeIconSvg, formatProgressText, BADGE_CATEGORIES, LEGENDARY_CATEGORIES } from "./badges.js";
 
 /* ---------------- helpers ---------------- */
 
@@ -887,7 +887,7 @@ $("#form-save-routine").addEventListener("submit", async (e) => {
     sets: l.sets.map((s) => ({ ...s })),
   }));
 
-  await db.addRoutine({ name, exercises });
+  await db.addRoutine({ name, exercises, createdAt: Date.now() });
   $("#modal-save-routine").hidden = true;
   showToast("루틴이 저장되었어요");
 });
@@ -949,6 +949,7 @@ async function applyRoutine(routineId) {
       sets: ex.sets.map((s) => ({ ...s })),
       sortOrder,
       createdAt: Date.now(),
+      fromRoutine: true,
     };
     await db.addWorkoutLog(log);
   }
@@ -1439,7 +1440,6 @@ $("#inbody-form").addEventListener("submit", async (e) => {
 /* ---------------- badges tab ---------------- */
 
 let allBadgesCache = [];
-let selectedBadgeCategory = "all";
 
 const SEEN_BADGE_IDS_KEY = "seenAchievedBadgeIds";
 
@@ -1463,75 +1463,54 @@ function formatBadgeDate(dateStr) {
   return `${y}.${m}.${d}`;
 }
 
-function renderBadgeCategoryTabs() {
-  const container = $("#badge-category-tabs");
-  const counts = { all: allBadgesCache.length };
-  BADGE_CATEGORIES.forEach((c) => {
-    counts[c.key] = allBadgesCache.filter((b) => b.category === c.key).length;
-  });
-  const tabs = [{ key: "all", label: "전체" }, ...BADGE_CATEGORIES.map((c) => ({ key: c.key, label: c.label }))];
-  container.innerHTML = tabs
-    .map(
-      (t) =>
-        `<button type="button" class="pill${selectedBadgeCategory === t.key ? " active" : ""}" data-category="${t.key}">${t.label} ${counts[t.key]}</button>`
-    )
-    .join("");
-
-  $$(".pill", container).forEach((btn) => {
-    btn.addEventListener("click", () => {
-      selectedBadgeCategory = btn.dataset.category;
-      $$(".pill", container).forEach((b) => b.classList.toggle("active", b === btn));
-      renderFilteredBadgeGrid();
-    });
-  });
-}
-
-function renderFilteredBadgeGrid() {
-  const grid = $("#badge-grid");
-  const filtered =
-    selectedBadgeCategory === "all" ? allBadgesCache : allBadgesCache.filter((b) => b.category === selectedBadgeCategory);
-
-  if (!filtered.length) {
-    grid.innerHTML = `<p class="empty-hint">뱃지가 없어요.</p>`;
-    return;
-  }
-
-  // 달성한 뱃지를 먼저 보여주되, 각 그룹 내 원래 순서는 유지
-  const sorted = filtered
-    .map((b, i) => ({ b, i }))
-    .sort((x, y) => (y.b.achieved - x.b.achieved) || (x.i - y.i))
-    .map((x) => x.b);
-
+function renderBadgeSections() {
+  const container = $("#badge-sections");
   const seenIds = getSeenBadgeIds();
+  const newlyAchievedIds = [];
 
-  grid.innerHTML = sorted
-    .map((b) => {
-      const icon = renderBadgeIconSvg(b);
-      const isNew = b.achieved && !seenIds.has(b.id);
-      const statusLine = b.achieved
-        ? `<span class="badge-date">🎉 ${formatBadgeDate(b.achievedDate)} 달성</span>`
-        : `<span class="badge-locked">🔒 미달성</span>`;
-      return `
-        <button type="button" class="badge-card${b.achieved ? " achieved" : ""}${isNew ? " badge-just-achieved" : ""}" data-badge-id="${b.id}">
-          <div class="badge-icon-wrap">
-            <div class="badge-icon">${icon}</div>
-            ${!b.achieved ? `<span class="badge-lock-overlay">🔒</span>` : ""}
-          </div>
-          <div class="badge-info">
-            <div class="badge-name">${b.name}</div>
-            <div class="badge-desc">${b.description}</div>
-            ${statusLine}
-          </div>
-        </button>`;
-    })
-    .join("");
+  container.innerHTML = BADGE_CATEGORIES.map((cat) => {
+    const badgesInCat = allBadgesCache.filter((b) => b.category === cat.key);
+    if (!badgesInCat.length) return "";
 
-  $$(".badge-card", grid).forEach((card) => {
+    // 달성한 뱃지를 카테고리 내에서 먼저 보여주되, 그룹 내 원래 순서는 유지
+    const sorted = badgesInCat
+      .map((b, i) => ({ b, i }))
+      .sort((x, y) => (y.b.achieved - x.b.achieved) || (x.i - y.i))
+      .map((x) => x.b);
+
+    const achievedCount = badgesInCat.filter((b) => b.achieved).length;
+    const isLegendary = LEGENDARY_CATEGORIES.includes(cat.key);
+
+    const cards = sorted
+      .map((b) => {
+        const icon = renderBadgeIconSvg(b);
+        const isNew = b.achieved && !seenIds.has(b.id);
+        if (b.achieved) newlyAchievedIds.push(b.id);
+        return `
+          <button type="button" class="badge-card${b.achieved ? " achieved" : ""}${isNew ? " badge-just-achieved" : ""}${b.achieved && isLegendary ? " badge-legendary" : ""}" data-badge-id="${b.id}" aria-label="${b.name}">
+            <div class="badge-icon-wrap">
+              <div class="badge-icon">${icon}</div>
+              ${!b.achieved ? `<span class="badge-lock-overlay">🔒</span>` : ""}
+            </div>
+          </button>`;
+      })
+      .join("");
+
+    return `
+      <section class="badge-section">
+        <div class="badge-section-header">
+          <span class="badge-section-title">${cat.label}</span>
+          <span class="badge-section-count">${achievedCount} / ${badgesInCat.length}</span>
+        </div>
+        <div class="badge-icon-grid">${cards}</div>
+      </section>`;
+  }).join("");
+
+  $$(".badge-card", container).forEach((card) => {
     card.addEventListener("click", () => openBadgeModal(card.dataset.badgeId));
   });
 
-  // 새로 달성한 뱃지의 pulse 애니메이션은 한 번만 보여주고, 이후엔 seen 처리
-  const newlyAchievedIds = sorted.filter((b) => b.achieved).map((b) => b.id);
+  // 새로 달성한 뱃지의 bounce 애니메이션은 한 번만 보여주고, 이후엔 seen 처리
   if (newlyAchievedIds.length) {
     newlyAchievedIds.forEach((id) => seenIds.add(id));
     saveSeenBadgeIds(seenIds);
@@ -1553,7 +1532,7 @@ function openBadgeModal(badgeId) {
   if (!badge) return;
 
   const categoryLabel = BADGE_CATEGORIES.find((c) => c.key === badge.category)?.label || badge.category;
-  $("#badge-modal-icon").innerHTML = renderBadgeIconSvg(badge, { size: 80 });
+  $("#badge-modal-icon").innerHTML = renderBadgeIconSvg(badge, { size: 100 });
   $("#badge-modal-icon").classList.toggle("achieved", badge.achieved);
   $("#badge-modal-name").textContent = badge.name;
   $("#badge-modal-category").textContent = categoryLabel;
@@ -1584,8 +1563,7 @@ $("#modal-badge-detail").addEventListener("click", (e) => {
 async function renderBadgesTab() {
   allBadgesCache = await evaluateAllBadges();
   renderBadgeSummary();
-  renderBadgeCategoryTabs();
-  renderFilteredBadgeGrid();
+  renderBadgeSections();
 }
 
 /* default equipment seeded on first run (when equipment store is empty) */

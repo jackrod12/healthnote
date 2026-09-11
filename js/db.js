@@ -243,6 +243,11 @@ export async function getWorkoutMemo(date) {
   return row ? row.memo : "";
 }
 
+export async function getAllWorkoutMemos() {
+  const db = await getDB();
+  return db.getAll("workoutMemo");
+}
+
 export async function setWorkoutMemo(date, memo) {
   const db = await getDB();
   await db.put("workoutMemo", { date, memo });
