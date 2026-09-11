@@ -40,8 +40,10 @@ export function drawLineChart(canvas, labels, values, options = {}) {
   const plotW = width - padding.left - padding.right;
   const plotH = height - padding.top - padding.bottom;
 
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  const min = options.yMin !== undefined && options.yMin !== null ? options.yMin : dataMin;
+  const max = options.yMax !== undefined && options.yMax !== null ? options.yMax : dataMax;
   const range = max - min || 1;
   const yFor = (v) => padding.top + plotH - ((v - min) / range) * plotH;
   const xFor = (i) =>
@@ -91,12 +93,14 @@ export function drawLineChart(canvas, labels, values, options = {}) {
     ctx.fill();
   });
 
-  // min/max labels
+  // axis min/max labels (min sits just above the bottom gridline so it never
+  // collides with the date label drawn below the plot area)
+  const roundTo1 = (v) => Math.round(v * 10) / 10;
   ctx.fillStyle = TEXT_DIM;
-  ctx.font = "11px system-ui";
+  ctx.font = "13px system-ui";
   ctx.textAlign = "left";
-  ctx.fillText(`${max}${unit}`, padding.left, padding.top - 4);
-  ctx.fillText(`${min}${unit}`, padding.left, height - 6);
+  ctx.fillText(`${roundTo1(max)}${unit}`, padding.left, padding.top - 4);
+  ctx.fillText(`${roundTo1(min)}${unit}`, padding.left, padding.top + plotH - 4);
 
   // first/last date labels
   if (labels && labels.length) {
@@ -168,16 +172,20 @@ export function drawBarChart(canvas, labels, values, options = {}) {
 
   // max label
   ctx.fillStyle = TEXT_DIM;
-  ctx.font = "11px system-ui";
+  ctx.font = "13px system-ui";
   ctx.textAlign = "left";
   ctx.fillText(`${Math.round(max)}${unit}`, padding.left, padding.top - 6);
 
-  // x labels
+  // x labels (skip evenly if they would overlap at this font size; always keep the last one)
   if (labels && labels.length) {
-    ctx.font = "10px system-ui";
+    ctx.font = "13px system-ui";
     ctx.textAlign = "center";
+    const slot = barWidth + barGap;
+    const maxLabelWidth = Math.max(...labels.map((l) => ctx.measureText(l).width));
+    const step = maxLabelWidth + 6 > slot ? Math.ceil((maxLabelWidth + 6) / slot) : 1;
     labels.forEach((label, i) => {
-      const x = padding.left + i * (barWidth + barGap) + barWidth / 2;
+      if (i % step !== 0 && i !== labels.length - 1) return;
+      const x = padding.left + i * slot + barWidth / 2;
       ctx.fillText(label, x, height - 6);
     });
   }

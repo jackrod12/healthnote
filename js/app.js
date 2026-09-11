@@ -450,7 +450,7 @@ async function renderWeeklyVolumeChart() {
     const ws = new Date(currentWeekStart);
     ws.setDate(currentWeekStart.getDate() - i * 7);
     const key = formatDate(ws);
-    weeks.push({ label: `${ws.getMonth() + 1}/${ws.getDate()}주`, volume: volumeByWeek.get(key) || 0 });
+    weeks.push({ label: `${ws.getMonth() + 1}/${ws.getDate()}`, volume: volumeByWeek.get(key) || 0 });
   }
 
   drawBarChart(
@@ -823,69 +823,85 @@ const INBODY_METRIC_LABELS = {
 let selectedInbodyMetric = "weight";
 let inbodyRecordsCache = [];
 
-function renderInbodyChart() {
+/* metric -> fitnessGoals key, used for the chart's y-axis lower bound */
+const INBODY_METRIC_GOAL_KEYS = {
+  weight: "targetWeight",
+  bodyFat: "targetBodyFat",
+  muscleMass: "targetMuscleMass",
+};
+
+async function getInbodyMetricGoal(metric) {
+  const goalKey = INBODY_METRIC_GOAL_KEYS[metric];
+  if (!goalKey) return null;
+  const goals = await db.getSetting("fitnessGoals", null);
+  return goals?.[goalKey] ?? null;
+}
+
+async function renderInbodyChart() {
   const metric = selectedInbodyMetric;
   const unit = $(`.pill[data-metric="${metric}"]`, $("#inbody-metric-tabs")).dataset.unit;
   $("#inbody-chart-title").textContent = `${INBODY_METRIC_LABELS[metric]} 변화`;
 
   const withMetric = inbodyRecordsCache.filter((r) => r[metric] !== null && r[metric] !== undefined);
   const recent = withMetric.slice(-10);
+  const values = recent.map((r) => r[metric]);
+
+  let yMin;
+  let yMax;
+  if (values.length) {
+    const dataMin = Math.min(...values);
+    const dataMax = Math.max(...values);
+    const goal = await getInbodyMetricGoal(metric);
+    const minBase = goal !== null && goal !== undefined ? Math.min(dataMin, goal) : dataMin;
+    yMin = minBase * 0.95;
+    yMax = dataMax * 1.05;
+    if (yMin === yMax) {
+      yMin -= 1;
+      yMax += 1;
+    }
+  }
+
   drawLineChart(
     $("#chart-inbody"),
     recent.map((r) => r.date.slice(5)),
-    recent.map((r) => r[metric]),
-    { color: "#00e5a0", unit }
+    values,
+    { color: "#00e5a0", unit, yMin, yMax }
   );
 }
 
 $$(".pill", $("#inbody-metric-tabs")).forEach((btn) => {
-  btn.addEventListener("click", () => {
+  btn.addEventListener("click", async () => {
     $$(".pill", $("#inbody-metric-tabs")).forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     selectedInbodyMetric = btn.dataset.metric;
-    renderInbodyChart();
+    await renderInbodyChart();
   });
 });
 
 async function renderInbodyTab() {
   if (!$("#inbody-date").value) $("#inbody-date").value = todayStr();
   inbodyRecordsCache = await db.getAllInbodyRecords();
-  renderInbodyList(inbodyRecordsCache);
-  renderInbodyChart();
+  await renderInbodyChart();
 }
 
-function renderInbodyList(records) {
-  const container = $("#inbody-list");
-  if (!records.length) {
-    container.innerHTML = `<p class="empty-hint">아직 기록이 없어요.</p>`;
-    return;
-  }
-  container.innerHTML = "";
-  records
-    .slice()
-    .sort((a, b) => (a.date < b.date ? 1 : -1))
-    .forEach((r) => {
-      const div = document.createElement("div");
-      div.className = "log-item";
-      const fmt = (v, unit = "") => (v === null || v === undefined ? "-" : `${v}${unit}`);
-      div.innerHTML = `
-        <div class="log-main">
-          <span class="log-title">${r.date}</span>
-          <span class="log-sub">체중 ${fmt(r.weight, "kg")} · 골격근 ${fmt(r.muscleMass, "kg")} · 체지방량 ${fmt(r.bodyFatMass, "kg")} · BMI ${fmt(r.bmi)}</span>
-          <span class="log-sub">체지방률 ${fmt(r.bodyFat, "%")} · 복부비만률 ${fmt(r.waistHipRatio)} · 내장지방 ${fmt(r.visceralFat)} · 인바디점수 ${fmt(r.inbodyScore)}</span>
-        </div>
-        <button class="log-delete" data-id="${r.id}">✕</button>`;
-      container.appendChild(div);
-    });
+/* accordion: 기록 추가 폼 펼치기/접기 */
+const inbodyFormCard = $("#inbody-form-card");
+const btnToggleInbodyForm = $("#btn-toggle-inbody-form");
 
-  $$(".log-delete", container).forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!confirm("정말 삭제할까요?")) return;
-      await db.deleteInbodyRecord(Number(btn.dataset.id));
-      renderInbodyTab();
-    });
-  });
+function openInbodyForm() {
+  inbodyFormCard.hidden = false;
+  btnToggleInbodyForm.textContent = "닫기";
 }
+
+function closeInbodyForm() {
+  inbodyFormCard.hidden = true;
+  btnToggleInbodyForm.textContent = "+ 기록 추가";
+}
+
+btnToggleInbodyForm.addEventListener("click", () => {
+  if (inbodyFormCard.hidden) openInbodyForm();
+  else closeInbodyForm();
+});
 
 function numOrNull(value) {
   return value === "" ? null : Number(value);
@@ -906,6 +922,7 @@ $("#inbody-form").addEventListener("submit", async (e) => {
   };
   await db.addInbodyRecord(record);
   $("#inbody-form").reset();
+  closeInbodyForm();
   await renderInbodyTab();
   showToast("인바디 기록이 추가되었어요");
 });

@@ -104,7 +104,7 @@
         <div class="stats-block">
           <h3 class="stats-subtitle">기구별 최고 중량 추이</h3>
           <select id="stats-equipment-select"></select>
-          <canvas id="chart-max-weight" width="380" height="160"></canvas>
+          <canvas id="chart-max-weight" width="380" height="200"></canvas>
         </div>
 
         <div class="stats-block">
@@ -114,7 +114,7 @@
 
         <div class="stats-block">
           <h3 class="stats-subtitle">주간 운동 볼륨</h3>
-          <canvas id="chart-weekly-volume" width="380" height="160"></canvas>
+          <canvas id="chart-weekly-volume" width="380" height="200"></canvas>
         </div>
       </div>
     </section>
@@ -122,6 +122,23 @@
     <!-- 인바디 -->
     <section class="view" id="view-inbody" data-view="inbody" hidden>
       <div class="card">
+        <h2 class="card-title" id="inbody-chart-title">체중 변화</h2>
+        <div class="pill-row" id="inbody-metric-tabs">
+          <button type="button" class="pill active" data-metric="weight" data-unit="kg">체중</button>
+          <button type="button" class="pill" data-metric="muscleMass" data-unit="kg">골격근량</button>
+          <button type="button" class="pill" data-metric="bodyFatMass" data-unit="kg">체지방량</button>
+          <button type="button" class="pill" data-metric="bmi" data-unit="">BMI</button>
+          <button type="button" class="pill" data-metric="bodyFat" data-unit="%">체지방률</button>
+          <button type="button" class="pill" data-metric="waistHipRatio" data-unit="">복부비만률</button>
+          <button type="button" class="pill" data-metric="visceralFat" data-unit="">내장지방레벨</button>
+          <button type="button" class="pill" data-metric="inbodyScore" data-unit="">인바디점수</button>
+        </div>
+        <canvas id="chart-inbody" width="380" height="200"></canvas>
+      </div>
+
+      <button type="button" class="btn btn-primary btn-block" id="btn-toggle-inbody-form">+ 기록 추가</button>
+
+      <div class="card" id="inbody-form-card" hidden>
         <h2 class="card-title">인바디 기록 추가</h2>
         <form id="inbody-form" class="form-grid">
           <label>측정일<input type="date" id="inbody-date" required /></label>
@@ -135,28 +152,6 @@
           <label>인바디점수<input type="number" step="1" id="inbody-score" /></label>
           <button type="submit" class="btn btn-primary btn-block">기록 추가</button>
         </form>
-      </div>
-
-      <div class="card">
-        <h2 class="card-title" id="inbody-chart-title">체중 변화</h2>
-        <div class="pill-row" id="inbody-metric-tabs">
-          <button type="button" class="pill active" data-metric="weight" data-unit="kg">체중</button>
-          <button type="button" class="pill" data-metric="muscleMass" data-unit="kg">골격근량</button>
-          <button type="button" class="pill" data-metric="bodyFatMass" data-unit="kg">체지방량</button>
-          <button type="button" class="pill" data-metric="bmi" data-unit="">BMI</button>
-          <button type="button" class="pill" data-metric="bodyFat" data-unit="%">체지방률</button>
-          <button type="button" class="pill" data-metric="waistHipRatio" data-unit="">복부비만률</button>
-          <button type="button" class="pill" data-metric="visceralFat" data-unit="">내장지방레벨</button>
-          <button type="button" class="pill" data-metric="inbodyScore" data-unit="">인바디점수</button>
-        </div>
-        <canvas id="chart-inbody" width="380" height="160"></canvas>
-      </div>
-
-      <div class="card">
-        <h2 class="card-title">기록 리스트</h2>
-        <div id="inbody-list" class="summary-list">
-          <p class="empty-hint">아직 기록이 없어요.</p>
-        </div>
       </div>
     </section>
 

@@ -21,6 +21,7 @@ html, body {
   color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
 }
 
 body {
@@ -37,6 +38,7 @@ body {
   flex-direction: column;
   background: var(--bg);
   position: relative;
+  overflow-x: hidden;
 }
 
 .topbar {
@@ -66,13 +68,14 @@ body {
 #views {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px 16px calc(96px + env(safe-area-inset-bottom, 0px));
 }
 
 .view {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .card {
@@ -108,6 +111,10 @@ body {
   color: var(--text);
   background: var(--card-alt);
   transition: transform 0.08s ease, opacity 0.15s ease;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .btn:active { transform: scale(0.97); }
 .btn-block { width: 100%; }
@@ -151,13 +158,15 @@ body {
   line-height: 1;
   padding: 4px 12px;
   cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .calendar-weekdays {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   text-align: center;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   margin-bottom: 6px;
 }
@@ -176,7 +185,7 @@ body {
   justify-content: center;
   gap: 3px;
   border-radius: 10px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
   cursor: pointer;
 }
@@ -209,7 +218,7 @@ body {
 .calendar-stats {
   margin-top: 12px;
   text-align: center;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 
@@ -226,7 +235,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 .activity-stat-item span:last-child {
@@ -252,7 +261,7 @@ body {
   color: var(--text);
 }
 .goal-progress-value {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   white-space: nowrap;
 }
@@ -273,7 +282,7 @@ body {
 }
 .goal-progress-pct {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   text-align: right;
 }
@@ -297,6 +306,13 @@ body {
 }
 .stats-block select { margin-bottom: 10px; }
 
+/* Charts */
+canvas {
+  display: block;
+  width: 100%;
+  height: 200px;
+}
+
 /* Pill tabs (inbody chart metric selector) */
 .pill-row {
   display: flex;
@@ -305,6 +321,7 @@ body {
   padding-bottom: 10px;
   margin-bottom: 4px;
   scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 .pill-row::-webkit-scrollbar { display: none; }
 
@@ -319,6 +336,7 @@ body {
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
+  min-height: 44px;
 }
 .pill.active {
   background: var(--mint);
@@ -336,6 +354,7 @@ input, select {
   font-size: 15px;
   font-family: inherit;
   width: 100%;
+  min-height: 44px;
 }
 input:focus, select:focus {
   outline: 1px solid var(--mint);
@@ -387,16 +406,16 @@ input:focus, select:focus {
 
 .log-item .log-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .log-item .log-sub {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 
 .log-item .log-manufacturer {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-dim);
   opacity: 0.8;
 }
@@ -408,6 +427,11 @@ input:focus, select:focus {
   font-size: 16px;
   cursor: pointer;
   padding: 4px 8px;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .equipment-item .log-main {
@@ -468,6 +492,11 @@ input:focus, select:focus {
   font-size: 16px;
   cursor: pointer;
   padding: 4px 6px;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .photo-field {
@@ -487,7 +516,7 @@ input:focus, select:focus {
 /* Workout totals */
 .workout-totals {
   text-align: center;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   padding: 4px 0 2px;
   display: flex;
@@ -502,7 +531,7 @@ input:focus, select:focus {
 .log-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 13px;
 }
 .log-table th, .log-table td {
   text-align: left;
@@ -534,6 +563,7 @@ input:focus, select:focus {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  min-height: 44px;
 }
 .drink-toggle-btn.active.drink-toggle-drink {
   background: var(--danger);
@@ -591,9 +621,10 @@ input:focus, select:focus {
   align-items: center;
   gap: 2px;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 13px;
   padding: 4px 0;
   cursor: pointer;
+  min-height: 44px;
 }
 
 .tab-btn .tab-icon {
@@ -666,6 +697,7 @@ input:focus, select:focus {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  min-height: 44px;
 }
 .segmented-btn.active {
   background: var(--mint);
