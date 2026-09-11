@@ -462,9 +462,8 @@ async function renderWeeklyVolumeChart() {
 }
 
 /* estimated calories: strength training uses total volume(kg) x 0.05 x (body weight / 70),
-   running uses distance(km) x body weight(kg) x 1.04 */
+   running uses MET x body weight(kg) x time(hours), with MET derived from pace(분/km) */
 const CALORIES_PER_KG_VOLUME = 0.05;
-const RUNNING_KCAL_PER_KM_PER_KG = 1.04;
 const DEFAULT_BODY_WEIGHT_KG = 70;
 
 function calcLogVolume(log) {
@@ -484,8 +483,18 @@ async function getLatestBodyWeightKg() {
   return records[records.length - 1].weight ?? DEFAULT_BODY_WEIGHT_KG;
 }
 
+function getRunningMET(pace) {
+  if (pace > 7) return 8.0;
+  if (pace >= 6) return 10.0;
+  if (pace >= 5) return 11.5;
+  if (pace >= 4) return 13.5;
+  return 16.0;
+}
+
 function calcRunningCalories(log, bodyWeightKg) {
-  return log.distance * bodyWeightKg * RUNNING_KCAL_PER_KM_PER_KG;
+  const met = getRunningMET(log.pace);
+  const hours = log.duration / 60;
+  return met * bodyWeightKg * hours;
 }
 
 async function renderEquipmentLogTable() {
