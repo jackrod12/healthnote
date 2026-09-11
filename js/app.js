@@ -150,6 +150,20 @@ function renderHomeWorkoutSummary(logs) {
 let calendarViewDate = new Date();
 calendarViewDate.setDate(1);
 
+function renderMonthActivityStats(monthLogs, monthDrinkLogs) {
+  const weightCount = monthLogs.filter((l) => l.type === "weight").length;
+  const runningCount = monthLogs.filter((l) => l.type === "running").length;
+  const drinkCount = monthDrinkLogs.filter((d) => d.type === "drink" || d.type === "light").length;
+  const proteinCount = monthDrinkLogs.filter((d) => d.type === "protein").length;
+
+  $("#month-activity-stats").innerHTML = `
+    <div class="activity-stat-item"><span>💪 웨이트 운동</span><span>${weightCount}회</span></div>
+    <div class="activity-stat-item"><span>🏃 유산소 운동</span><span>${runningCount}회</span></div>
+    <div class="activity-stat-item"><span>🍺 음주 (반주 포함)</span><span>${drinkCount}회</span></div>
+    <div class="activity-stat-item"><span>🥤 프로틴 섭취</span><span>${proteinCount}회</span></div>
+  `;
+}
+
 async function renderCalendar() {
   const year = calendarViewDate.getFullYear();
   const month = calendarViewDate.getMonth();
@@ -168,11 +182,13 @@ async function renderCalendar() {
     db.getDrinkLogsBetween(monthStartStr, monthEndExclusiveStr),
   ]);
 
+  renderMonthActivityStats(monthLogs, monthDrinkLogs);
+
   const dayInfo = new Map();
   const dayInfoFor = (date) => {
     let info = dayInfo.get(date);
     if (!info) {
-      info = { weight: false, running: false, drink: null };
+      info = { weight: false, running: false, drink: null, protein: false };
       dayInfo.set(date, info);
     }
     return info;
@@ -183,7 +199,9 @@ async function renderCalendar() {
     if (l.type === "running") info.running = true;
   });
   monthDrinkLogs.forEach((d) => {
-    dayInfoFor(d.date).drink = d.type;
+    const info = dayInfoFor(d.date);
+    if (d.type === "drink" || d.type === "light") info.drink = d.type;
+    if (d.type === "protein") info.protein = true;
   });
 
   const datesWithLogs = new Set(monthLogs.map((l) => l.date));
@@ -210,6 +228,7 @@ async function renderCalendar() {
       if (info.running) dots += '<span class="calendar-dot dot-running"></span>';
       if (info.drink === "drink") dots += '<span class="calendar-dot dot-drink"></span>';
       if (info.drink === "light") dots += '<span class="calendar-dot dot-light"></span>';
+      if (info.protein) dots += '<span class="calendar-dot dot-protein"></span>';
     }
 
     cell.innerHTML = `
@@ -235,18 +254,20 @@ async function renderCalendar() {
 
 let currentDetailDate = null;
 
-function updateDrinkToggleButtons(activeType) {
-  $("#btn-toggle-drink").classList.toggle("active", activeType === "drink");
-  $("#btn-toggle-light").classList.toggle("active", activeType === "light");
+function updateDrinkToggleButtons(records) {
+  const types = new Set(records.map((r) => r.type));
+  $("#btn-toggle-drink").classList.toggle("active", types.has("drink"));
+  $("#btn-toggle-light").classList.toggle("active", types.has("light"));
+  $("#btn-toggle-protein").classList.toggle("active", types.has("protein"));
 }
 
 async function showDayDetail(dateString) {
   currentDetailDate = dateString;
   const logs = await db.getWorkoutLogsByDate(dateString);
-  const drink = await db.getDrinkLog(dateString);
+  const drinkRecords = await db.getDrinkLogsByDate(dateString);
   $("#calendar-day-detail").hidden = false;
   $("#calendar-day-title").textContent = `${dateString} 운동 내역`;
-  updateDrinkToggleButtons(drink ? drink.type : null);
+  updateDrinkToggleButtons(drinkRecords);
 
   const container = $("#calendar-day-logs");
   if (!logs.length) {
@@ -276,19 +297,24 @@ async function showDayDetail(dateString) {
 
 async function toggleDrinkType(type) {
   if (!currentDetailDate) return;
-  const existing = await db.getDrinkLog(currentDetailDate);
-  if (existing && existing.type === type) {
-    await db.deleteDrinkLog(currentDetailDate);
-    updateDrinkToggleButtons(null);
+  const records = await db.getDrinkLogsByDate(currentDetailDate);
+  const existing = records.find((r) => r.type === type);
+  if (existing) {
+    await db.deleteDrinkLogById(existing.id);
   } else {
-    await db.setDrinkLog(currentDetailDate, type);
-    updateDrinkToggleButtons(type);
+    if (type === "drink" || type === "light") {
+      const conflicting = records.find((r) => r.type === "drink" || r.type === "light");
+      if (conflicting) await db.deleteDrinkLogById(conflicting.id);
+    }
+    await db.addDrinkLog(currentDetailDate, type);
   }
+  updateDrinkToggleButtons(await db.getDrinkLogsByDate(currentDetailDate));
   await renderCalendar();
 }
 
 $("#btn-toggle-drink").addEventListener("click", () => toggleDrinkType("drink"));
 $("#btn-toggle-light").addEventListener("click", () => toggleDrinkType("light"));
+$("#btn-toggle-protein").addEventListener("click", () => toggleDrinkType("protein"));
 
 $("#btn-prev-month").addEventListener("click", () => {
   calendarViewDate.setMonth(calendarViewDate.getMonth() - 1);
@@ -305,6 +331,8 @@ $("#btn-close-day-detail").addEventListener("click", () => {
 });
 
 /* ---------------- workout tab ---------------- */
+
+const DEFAULT_REST_SECONDS = 90;
 
 let equipmentCache = [];
 let restTimer = null;
@@ -331,15 +359,14 @@ async function populateEquipmentSelect() {
 
 async function renderWorkoutTab() {
   await populateEquipmentSelect();
-  const restSeconds = await db.getSetting("defaultRestSeconds", 90);
   if (!restTimer) initRestTimer();
   if (!restTimer.active) {
-    restTimer.setDuration(restSeconds);
+    restTimer.setDuration(DEFAULT_REST_SECONDS);
   }
   $("#timer-display").textContent = RestTimer.formatTime(restTimer.remaining);
 
   const logs = await db.getWorkoutLogsByDate(todayStr());
-  renderWorkoutLogList(logs);
+  await renderWorkoutLogList(logs);
 
   await renderWorkoutStats();
 }
@@ -434,8 +461,11 @@ async function renderWeeklyVolumeChart() {
   );
 }
 
-/* estimated calories for strength training: total volume(kg) x 0.05 */
+/* estimated calories: strength training uses total volume(kg) x 0.05,
+   running uses distance(km) x body weight(kg) x 1.04 */
 const CALORIES_PER_KG_VOLUME = 0.05;
+const RUNNING_KCAL_PER_KM_PER_KG = 1.04;
+const DEFAULT_BODY_WEIGHT_KG = 70;
 
 function calcLogVolume(log) {
   if (log.type !== "weight") return 0;
@@ -446,6 +476,16 @@ function calcLogVolume(log) {
 
 function calcCaloriesFromVolume(volume) {
   return volume * CALORIES_PER_KG_VOLUME;
+}
+
+async function getLatestBodyWeightKg() {
+  const records = await db.getAllInbodyRecords();
+  if (!records.length) return DEFAULT_BODY_WEIGHT_KG;
+  return records[records.length - 1].weight ?? DEFAULT_BODY_WEIGHT_KG;
+}
+
+function calcRunningCalories(log, bodyWeightKg) {
+  return log.distance * bodyWeightKg * RUNNING_KCAL_PER_KM_PER_KG;
 }
 
 async function renderEquipmentLogTable() {
@@ -502,7 +542,7 @@ $("#stats-equipment-select").addEventListener("change", () => {
   renderEquipmentLogTable();
 });
 
-function renderWorkoutLogList(logs) {
+async function renderWorkoutLogList(logs) {
   const container = $("#workout-log-list");
   const totalsEl = $("#workout-log-totals");
   if (!logs.length) {
@@ -513,6 +553,7 @@ function renderWorkoutLogList(logs) {
   container.innerHTML = "";
   let totalVolume = 0;
   let totalCalories = 0;
+  const bodyWeightKg = await getLatestBodyWeightKg();
 
   logs
     .slice()
@@ -533,6 +574,8 @@ function renderWorkoutLogList(logs) {
           </div>
           <button class="log-delete" data-id="${log.id}">✕</button>`;
       } else {
+        const calories = calcRunningCalories(log, bodyWeightKg);
+        totalCalories += calories;
         div.innerHTML = `
           <div class="log-main">
             <span class="log-title">러닝</span>
@@ -544,14 +587,17 @@ function renderWorkoutLogList(logs) {
     });
 
   totalsEl.hidden = false;
-  totalsEl.textContent = `오늘 총 볼륨 ${Math.round(totalVolume)}kg · 총 추정 칼로리 ${Math.round(totalCalories)}kcal`;
+  totalsEl.innerHTML = `
+    <div>오늘 총 볼륨 ${Math.round(totalVolume)}kg</div>
+    <div>오늘 총 소모 칼로리: 약 ${Math.round(totalCalories)}kcal</div>
+  `;
 
   $$(".log-delete", container).forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!confirm("정말 삭제할까요?")) return;
       await db.deleteWorkoutLog(Number(btn.dataset.id));
       const refreshed = await db.getWorkoutLogsByDate(todayStr());
-      renderWorkoutLogList(refreshed);
+      await renderWorkoutLogList(refreshed);
       renderHomeWorkoutSummary(refreshed);
     });
   });
@@ -686,7 +732,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
   await db.addWorkoutLog(log);
   closeAddWorkoutModal();
   const logs = await db.getWorkoutLogsByDate(todayStr());
-  renderWorkoutLogList(logs);
+  await renderWorkoutLogList(logs);
   renderHomeWorkoutSummary(logs);
   showToast("운동이 기록되었어요");
 
@@ -728,7 +774,7 @@ $("#form-running").addEventListener("submit", async (e) => {
   await db.addWorkoutLog(log);
   closeAddWorkoutModal();
   const logs = await db.getWorkoutLogsByDate(todayStr());
-  renderWorkoutLogList(logs);
+  await renderWorkoutLogList(logs);
   renderHomeWorkoutSummary(logs);
   showToast("러닝이 기록되었어요");
 });
@@ -746,9 +792,8 @@ $("#btn-timer-toggle").addEventListener("click", () => {
 });
 $("#btn-timer-plus").addEventListener("click", () => restTimer.addSeconds(15));
 $("#btn-timer-minus").addEventListener("click", () => restTimer.addSeconds(-15));
-$("#btn-timer-reset").addEventListener("click", async () => {
-  const restSeconds = await db.getSetting("defaultRestSeconds", 90);
-  restTimer.reset(restSeconds);
+$("#btn-timer-reset").addEventListener("click", () => {
+  restTimer.reset(DEFAULT_REST_SECONDS);
   $("#btn-timer-toggle").textContent = "시작";
 });
 
@@ -899,8 +944,6 @@ const DEFAULT_EQUIPMENT = [
 /* ---------------- settings tab ---------------- */
 
 async function renderSettingsTab() {
-  $("#default-rest-seconds").value = await db.getSetting("defaultRestSeconds", 90);
-
   const goals = await db.getSetting("fitnessGoals", {});
   $("#goal-current-weight").value = goals.currentWeight ?? "";
   $("#goal-target-weight").value = goals.targetWeight ?? "";
@@ -928,23 +971,25 @@ async function renderEquipmentList() {
       ? `<img class="equipment-thumb" src="${eq.photo}" alt="${eq.name}" />`
       : `<div class="equipment-thumb equipment-thumb-placeholder">🏋️</div>`;
     div.innerHTML = `
+      <input type="checkbox" class="equipment-checkbox" data-id="${eq.id}" />
       ${thumb}
       <div class="log-main">
         <span class="log-title">${eq.name}</span>
+        ${eq.manufacturer ? `<span class="log-manufacturer">${eq.manufacturer}</span>` : ""}
         <span class="log-sub">${eq.category}${eq.memo ? ` · ${eq.memo}` : ""}</span>
       </div>
       <div class="equipment-item-actions">
         <button type="button" class="icon-btn equipment-edit" data-id="${eq.id}">✏️</button>
-        <button type="button" class="icon-btn equipment-delete" data-id="${eq.id}">🗑️</button>
       </div>`;
     container.appendChild(div);
   });
 
-  $$(".equipment-delete", container).forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!confirm("정말 삭제할까요?")) return;
-      await db.deleteEquipment(Number(btn.dataset.id));
-      await renderEquipmentList();
+  $("#equipment-select-all").checked = false;
+
+  $$(".equipment-checkbox", container).forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const all = $$(".equipment-checkbox", container);
+      $("#equipment-select-all").checked = all.length > 0 && all.every((c) => c.checked);
     });
   });
 
@@ -952,6 +997,24 @@ async function renderEquipmentList() {
     btn.addEventListener("click", () => openEditEquipmentModal(Number(btn.dataset.id)));
   });
 }
+
+$("#equipment-select-all").addEventListener("change", (e) => {
+  $$(".equipment-checkbox").forEach((cb) => (cb.checked = e.target.checked));
+});
+
+$("#btn-delete-selected-equipment").addEventListener("click", async () => {
+  const selectedIds = $$(".equipment-checkbox:checked").map((cb) => Number(cb.dataset.id));
+  if (!selectedIds.length) {
+    showToast("선택된 기구가 없어요");
+    return;
+  }
+  if (!confirm(`선택한 ${selectedIds.length}개 기구를 삭제할까요?`)) return;
+  for (const id of selectedIds) {
+    await db.deleteEquipment(id);
+  }
+  await renderEquipmentList();
+  showToast("선택한 기구가 삭제되었어요");
+});
 
 /* equipment edit modal */
 let editingEquipmentId = null;
@@ -964,6 +1027,7 @@ function openEditEquipmentModal(id) {
   pendingEditPhoto = undefined;
 
   $("#edit-equipment-name").value = eq.name;
+  $("#edit-equipment-manufacturer").value = eq.manufacturer || "";
   $("#edit-equipment-category").value = eq.category;
   $("#edit-equipment-memo").value = eq.memo || "";
 
@@ -1011,12 +1075,13 @@ $("#form-edit-equipment").addEventListener("submit", async (e) => {
   if (editingEquipmentId == null) return;
   const name = $("#edit-equipment-name").value.trim();
   if (!name) return;
+  const manufacturer = $("#edit-equipment-manufacturer").value.trim();
   const category = $("#edit-equipment-category").value;
   const memo = $("#edit-equipment-memo").value.trim();
   const existing = settingsEquipmentCache.find((eItem) => eItem.id === editingEquipmentId);
   const photo = pendingEditPhoto !== undefined ? pendingEditPhoto : existing?.photo ?? null;
 
-  await db.updateEquipment(editingEquipmentId, { name, category, memo, photo });
+  await db.updateEquipment(editingEquipmentId, { name, manufacturer, category, memo, photo });
   closeEditEquipmentModal();
   await renderEquipmentList();
   showToast("기구가 수정되었어요");
@@ -1033,13 +1098,6 @@ $("#goals-form").addEventListener("submit", async (e) => {
   };
   await db.setSetting("fitnessGoals", goals);
   showToast("목표가 저장되었어요");
-});
-
-$("#rest-time-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const seconds = Number($("#default-rest-seconds").value) || 90;
-  await db.setSetting("defaultRestSeconds", seconds);
-  showToast("기본 쉬는시간이 저장되었어요");
 });
 
 let pendingAddPhoto = null;
@@ -1064,10 +1122,11 @@ $("#equipment-photo-input").addEventListener("change", (e) => {
 $("#equipment-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("#equipment-name").value.trim();
+  const manufacturer = $("#equipment-manufacturer").value.trim();
   const category = $("#equipment-category").value;
   const memo = $("#equipment-memo").value.trim();
   if (!name) return;
-  await db.addEquipment({ name, category, memo, photo: pendingAddPhoto });
+  await db.addEquipment({ name, manufacturer, category, memo, photo: pendingAddPhoto });
   $("#equipment-form").reset();
   pendingAddPhoto = null;
   $("#equipment-photo-preview").hidden = true;
@@ -1151,6 +1210,7 @@ async function init() {
   await db.seedDefaultEquipmentIfEmpty(DEFAULT_EQUIPMENT);
   await db.deleteSetting("weeklyRoutinePrefs");
   await db.deleteSetting("weeklyRoutine");
+  await db.deleteSetting("defaultRestSeconds");
 
   switchTab(getLastTab());
 

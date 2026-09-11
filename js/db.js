@@ -1,7 +1,7 @@
 import { openDB } from "https://cdn.jsdelivr.net/npm/idb@8/+esm";
 
 const DB_NAME = "healthnote-db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export const STORE_NAMES = ["settings", "equipment", "workoutLogs", "inbodyRecords", "drinkLog"];
 
@@ -10,7 +10,7 @@ let dbPromise = null;
 function getDB() {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      async upgrade(db, oldVersion, _newVersion, transaction) {
         if (!db.objectStoreNames.contains("settings")) {
           db.createObjectStore("settings", { keyPath: "key" });
         }
@@ -26,8 +26,22 @@ function getDB() {
           const store = db.createObjectStore("inbodyRecords", { keyPath: "id", autoIncrement: true });
           store.createIndex("date", "date");
         }
+
         if (!db.objectStoreNames.contains("drinkLog")) {
-          db.createObjectStore("drinkLog", { keyPath: "date" });
+          const store = db.createObjectStore("drinkLog", { keyPath: "id", autoIncrement: true });
+          store.createIndex("date", "date");
+        } else if (oldVersion < 3) {
+          // v2 schema stored one record per date (keyPath: "date"); migrate to
+          // an id-keyed store with a date index so multiple entries per date
+          // (e.g. drink + protein) can coexist.
+          const oldStore = transaction.objectStore("drinkLog");
+          const oldRecords = await oldStore.getAll();
+          db.deleteObjectStore("drinkLog");
+          const newStore = db.createObjectStore("drinkLog", { keyPath: "id", autoIncrement: true });
+          newStore.createIndex("date", "date");
+          for (const rec of oldRecords) {
+            newStore.add({ date: rec.date, type: rec.type });
+          }
         }
       },
     });
@@ -141,26 +155,26 @@ export async function getAllInbodyRecords() {
   return all.sort((a, b) => (a.date > b.date ? 1 : -1));
 }
 
-/* ---------- drink log ---------- */
-export async function getDrinkLog(date) {
+/* ---------- drink log (alcohol + protein tracking; multiple entries per date) ---------- */
+export async function getDrinkLogsByDate(date) {
   const db = await getDB();
-  return db.get("drinkLog", date);
+  return db.getAllFromIndex("drinkLog", "date", date);
 }
 
-export async function setDrinkLog(date, type) {
+export async function addDrinkLog(date, type) {
   const db = await getDB();
-  await db.put("drinkLog", { date, type });
+  return db.add("drinkLog", { date, type });
 }
 
-export async function deleteDrinkLog(date) {
+export async function deleteDrinkLogById(id) {
   const db = await getDB();
-  await db.delete("drinkLog", date);
+  await db.delete("drinkLog", id);
 }
 
 export async function getDrinkLogsBetween(startDateInclusive, endDateExclusive) {
   const db = await getDB();
   const range = IDBKeyRange.bound(startDateInclusive, endDateExclusive, false, true);
-  return db.getAll("drinkLog", range);
+  return db.getAllFromIndex("drinkLog", "date", range);
 }
 
 /* ---------- backup / restore ---------- */
