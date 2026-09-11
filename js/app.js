@@ -1,6 +1,6 @@
 import * as db from "./db.js";
 import { drawLineChart } from "./chart.js";
-import { evaluateAllBadges, renderBadgeIconSvg, formatProgressText, BADGE_CATEGORIES, LEGENDARY_CATEGORIES } from "./badges.js";
+import { evaluateAllBadges, renderBadgeIconSvg, formatProgressText, BADGE_CATEGORIES } from "./badges.js";
 
 /* ---------------- helpers ---------------- */
 
@@ -1441,58 +1441,53 @@ $("#inbody-form").addEventListener("submit", async (e) => {
 
 let allBadgesCache = [];
 
-const SEEN_BADGE_IDS_KEY = "seenAchievedBadgeIds";
-
-function getSeenBadgeIds() {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(SEEN_BADGE_IDS_KEY) || "[]"));
-  } catch {
-    return new Set();
-  }
-}
-
-function saveSeenBadgeIds(idSet) {
-  try {
-    localStorage.setItem(SEEN_BADGE_IDS_KEY, JSON.stringify([...idSet]));
-  } catch {}
-}
-
 function formatBadgeDate(dateStr) {
   if (!dateStr) return "";
   const [y, m, d] = dateStr.split("-");
   return `${y}.${m}.${d}`;
 }
 
+function renderBadgeCard(b) {
+  const icon = renderBadgeIconSvg(b, { width: 64, height: 76 });
+  return `
+    <button type="button" class="badge-card${b.achieved ? " achieved" : ""}" data-badge-id="${b.id}" aria-label="${b.name}">
+      ${icon}
+    </button>`;
+}
+
 function renderBadgeSections() {
   const container = $("#badge-sections");
-  const seenIds = getSeenBadgeIds();
-  const newlyAchievedIds = [];
 
   container.innerHTML = BADGE_CATEGORIES.map((cat) => {
     const badgesInCat = allBadgesCache.filter((b) => b.category === cat.key);
     if (!badgesInCat.length) return "";
 
-    // 달성한 뱃지를 카테고리 내에서 먼저 보여주되, 그룹 내 원래 순서는 유지
-    const sorted = badgesInCat
-      .map((b, i) => ({ b, i }))
-      .sort((x, y) => (y.b.achieved - x.b.achieved) || (x.i - y.i))
-      .map((x) => x.b);
-
     const achievedCount = badgesInCat.filter((b) => b.achieved).length;
-    const isLegendary = LEGENDARY_CATEGORIES.includes(cat.key);
 
-    const cards = sorted
-      .map((b) => {
-        const icon = renderBadgeIconSvg(b);
-        const isNew = b.achieved && !seenIds.has(b.id);
-        if (b.achieved) newlyAchievedIds.push(b.id);
+    // 같은 시리즈끼리 원래 순서 그대로 묶는다 (achieved-first 정렬은 시리즈 행 내부에서만 적용)
+    const seriesOrder = [];
+    const seriesMap = new Map();
+    badgesInCat.forEach((b) => {
+      const key = b.series || b.name;
+      if (!seriesMap.has(key)) {
+        seriesMap.set(key, []);
+        seriesOrder.push(key);
+      }
+      seriesMap.get(key).push(b);
+    });
+
+    const rows = seriesOrder
+      .map((seriesName) => {
+        const badgesInSeries = seriesMap
+          .get(seriesName)
+          .slice()
+          .sort((a, b) => b.achieved - a.achieved);
+        const cards = badgesInSeries.map(renderBadgeCard).join("");
         return `
-          <button type="button" class="badge-card${b.achieved ? " achieved" : ""}${isNew ? " badge-just-achieved" : ""}${b.achieved && isLegendary ? " badge-legendary" : ""}" data-badge-id="${b.id}" aria-label="${b.name}">
-            <div class="badge-icon-wrap">
-              <div class="badge-icon">${icon}</div>
-              ${!b.achieved ? `<span class="badge-lock-overlay">🔒</span>` : ""}
-            </div>
-          </button>`;
+          <div class="badge-series-row">
+            <div class="badge-series-title">${seriesName}</div>
+            <div class="badge-series-scroll">${cards}</div>
+          </div>`;
       })
       .join("");
 
@@ -1502,19 +1497,13 @@ function renderBadgeSections() {
           <span class="badge-section-title">${cat.label}</span>
           <span class="badge-section-count">${achievedCount} / ${badgesInCat.length}</span>
         </div>
-        <div class="badge-icon-grid">${cards}</div>
+        ${rows}
       </section>`;
   }).join("");
 
   $$(".badge-card", container).forEach((card) => {
     card.addEventListener("click", () => openBadgeModal(card.dataset.badgeId));
   });
-
-  // 새로 달성한 뱃지의 bounce 애니메이션은 한 번만 보여주고, 이후엔 seen 처리
-  if (newlyAchievedIds.length) {
-    newlyAchievedIds.forEach((id) => seenIds.add(id));
-    saveSeenBadgeIds(seenIds);
-  }
 }
 
 function renderBadgeSummary() {
@@ -1532,7 +1521,7 @@ function openBadgeModal(badgeId) {
   if (!badge) return;
 
   const categoryLabel = BADGE_CATEGORIES.find((c) => c.key === badge.category)?.label || badge.category;
-  $("#badge-modal-icon").innerHTML = renderBadgeIconSvg(badge, { size: 100 });
+  $("#badge-modal-icon").innerHTML = renderBadgeIconSvg(badge, { width: 120, height: 142 });
   $("#badge-modal-icon").classList.toggle("achieved", badge.achieved);
   $("#badge-modal-name").textContent = badge.name;
   $("#badge-modal-category").textContent = categoryLabel;

@@ -1,53 +1,48 @@
 import * as db from "./db.js";
 
 /* =====================================================================
- * 뱃지 시스템 — 마라톤 완주 메달 스타일
+ * 뱃지 시스템 — 마라톤 완주 메달 스타일 (2차 개편)
  * 모든 뱃지는 DB에 저장되지 않고, 기존 기록(workoutLogs/inbodyRecords/
  * drinkLog2/routines/workoutMemo/settings)으로부터 매번 다시 계산됩니다.
  * "달성일"은 조건을 최초로 만족시킨 시점의 날짜를 데이터에서 역산해서
  * 구합니다.
  *
- * 디자인: 카테고리별 메달 외곽 형태(방패/불꽃원/다이아몬드/육각형/별/번개/
- * 로제트/선버스트/팔각형/크레스트/실)에 리본을 두르고, 티어별 메탈릭
- * 그라디언트(청동→은→금→백금→다이아몬드→흑요석)를 입힌다. 달성/미달성
- * 톤(그레이스케일+20% 불투명도)은 app.js의 CSS가 담당하고, 여기서는
- * 항상 풀컬러 SVG를 만들어 낸다.
+ * 디자인: 상단 고리 + 원형 메달(카테고리별 컬러 그라디언트 얼굴 + 티어별
+ * 메탈릭 테두리) + 중앙 아이콘 + 은색 리본 배너(시리즈명) + 리본 아래
+ * 수치 텍스트. 달성/미달성 톤(그레이스케일+40% 불투명도)은 app.js의
+ * CSS가 담당하고, 여기서는 항상 풀컬러 SVG를 만들어 낸다.
  * ===================================================================== */
 
 export const BADGE_CATEGORIES = [
-  { key: "pr", label: "PR", color: "#FFD700" },
-  { key: "streak", label: "Streak", color: "#FF6B35" },
-  { key: "cardio", label: "유산소", color: "#4A9EFF" },
-  { key: "inbody", label: "인바디", color: "#00E5A0" },
-  { key: "lifestyle", label: "생활습관", color: "#A855F7" },
-  { key: "volume", label: "볼륨 & 칼로리", color: "#FF4444" },
-  { key: "style", label: "운동 스타일 & 개성", color: "#FF8FB1" },
-  { key: "special", label: "특별한 순간", color: "#FFB84D" },
-  { key: "milestone", label: "운동량 마일스톤", color: "#38BDF8" },
-  { key: "challenge", label: "챌린지", color: "#F43F5E" },
-  { key: "hidden", label: "히든", color: "#8B5CF6" },
+  { key: "pr", label: "PR" },
+  { key: "streak", label: "Streak" },
+  { key: "cardio", label: "유산소" },
+  { key: "inbody", label: "인바디" },
+  { key: "lifestyle", label: "생활습관" },
+  { key: "volume", label: "볼륨 & 칼로리" },
+  { key: "style", label: "운동 스타일 & 개성" },
+  { key: "special", label: "특별한 순간" },
+  { key: "milestone", label: "운동량 마일스톤" },
+  { key: "challenge", label: "챌린지" },
+  { key: "hidden", label: "히든" },
 ];
 
-/* 레전더리 취급(무지개 shimmer) 카테고리 */
-export const LEGENDARY_CATEGORIES = ["special", "challenge", "hidden"];
-
-/* ---------------- 티어(단계)별 메탈릭 컬러: 청동→은→금→백금→다이아몬드→흑요석 ---------------- */
-export const TIER_COLORS = ["#CD7F32", "#C0C0C0", "#FFD700", "#E5E4E2", "#B9F2FF", "#6B4E8E"];
-
-/* ---------------- 카테고리 → 외곽 형태 ---------------- */
-const CATEGORY_SHAPE = {
-  pr: "shield",
-  streak: "circle-flame",
-  cardio: "diamond",
-  inbody: "hexagon",
-  lifestyle: "star",
-  volume: "bolt",
-  style: "circle-rosette",
-  special: "circle-sunburst",
-  milestone: "octagon",
-  challenge: "crest",
-  hidden: "circle-seal",
+/* ---------------- 카테고리별 메달 얼굴 컬러 (그라디언트 2색) ---------------- */
+const CATEGORY_COLORS = {
+  pr: ["#1565C0", "#42A5F5"],
+  streak: ["#C62828", "#EF5350"],
+  cardio: ["#0277BD", "#29B6F6"],
+  inbody: ["#2E7D32", "#66BB6A"],
+  lifestyle: ["#6A1B9A", "#AB47BC"],
+  volume: ["#E65100", "#FFA726"],
+  style: ["#00838F", "#4DD0E1"],
+  special: ["#B8860B", "#FFD54F"],
+  challenge: ["#B8860B", "#FFD54F"],
+  hidden: ["#B8860B", "#FFD54F"],
 };
+
+/* ---------------- 티어(단계)별 메탈릭 테두리 색: 청동→은→금→백금→다이아몬드→흑요석 ---------------- */
+const TIER_COLORS = ["#CD7F32", "#C0C0C0", "#FFD700", "#E5E4E2", "#B9F2FF", "#6B4E8E"];
 
 /* ---------------- 색상 유틸 ---------------- */
 function hexToRgb(hex) {
@@ -71,59 +66,7 @@ function darken(hex, amt) {
   return rgbToHex(r * (1 - amt), g * (1 - amt), b * (1 - amt));
 }
 
-/* ---------------- 외곽 형태 path (내부 좌표계 0..40) ---------------- */
-function starPath(cx, cy, outerR, innerR, points) {
-  const step = Math.PI / points;
-  let d = "";
-  for (let i = 0; i < points * 2; i++) {
-    const r = i % 2 === 0 ? outerR : innerR;
-    const angle = -Math.PI / 2 + i * step;
-    const x = (cx + r * Math.cos(angle)).toFixed(2);
-    const y = (cy + r * Math.sin(angle)).toFixed(2);
-    d += (i === 0 ? "M" : "L") + x + " " + y + " ";
-  }
-  return d + "Z";
-}
-function regularPolygonPath(cx, cy, r, sides, rotationDeg = -90) {
-  let d = "";
-  for (let i = 0; i < sides; i++) {
-    const angle = ((rotationDeg + (360 / sides) * i) * Math.PI) / 180;
-    const x = (cx + r * Math.cos(angle)).toFixed(2);
-    const y = (cy + r * Math.sin(angle)).toFixed(2);
-    d += (i === 0 ? "M" : "L") + x + " " + y + " ";
-  }
-  return d + "Z";
-}
-
-const SHAPES = {
-  shield: "M20 3 L34 8 V18 C34 29 27 35.5 20 38 C13 35.5 6 29 6 18 V8 Z",
-  diamond: "M20 2 L37 20 L20 38 L3 20 Z",
-  hexagon: "M20 3 L35 11.5 L35 28.5 L20 37 L5 28.5 L5 11.5 Z",
-  bolt: "M24 2 L9 23 H18 L15 38 L33 15 H23 Z",
-  star: starPath(20, 20, 18, 7.2, 5),
-  octagon: regularPolygonPath(20, 20, 17, 8, -90),
-  crest: "M9 3 H31 L34 9 V19 C34 29 27 35.5 20 38.5 C13 35.5 6 29 6 19 V9 Z",
-};
-
-/* 원형 + 꽃잎/스파이크 링(streak/style/special/hidden)을 이루는 작은 단위 도형 */
-const FLAME_SPIKE_D = "M20 1 C21.8 4.5 21.8 7 20 9.5 C18.2 7 18.2 4.5 20 1 Z";
-const ROSETTE_PETAL_D = "M20 1 L22.6 8 L20 6.8 L17.4 8 Z";
-const SUNBURST_SPIKE_D = "M20 0 L21.3 8.5 L18.7 8.5 Z";
-const SEAL_SCALLOP_D = "M20 2 Q22.4 2 22.4 6 Q20 8.2 17.6 6 Q17.6 2 20 2 Z";
-
-const RING_SHAPES = {
-  "circle-flame": { petal: FLAME_SPIKE_D, count: 8, r: 13 },
-  "circle-rosette": { petal: ROSETTE_PETAL_D, count: 10, r: 14 },
-  "circle-sunburst": { petal: SUNBURST_SPIKE_D, count: 12, r: 13 },
-  "circle-seal": { petal: SEAL_SCALLOP_D, count: 16, r: 15 },
-};
-Object.values(RING_SHAPES).forEach((cfg) => {
-  cfg.angles = Array.from({ length: cfg.count }, (_, i) => (360 / cfg.count) * i);
-});
-
-const STAR_GLYPH_PATH = starPath(20, 20, 11, 4.5, 5);
-
-/* ---------------- 뱃지 내부 글리프(작은 장식 아이콘) ---------------- */
+/* ---------------- 뱃지 내부 글리프(작은 장식 아이콘, 0..40 좌표계) ---------------- */
 const GLYPHS = {
   barbellBench: `
     <rect x="5" y="18" width="30" height="4" rx="2" fill="#fff"/>
@@ -210,7 +153,7 @@ const GLYPHS = {
     <path d="M20 20 C30 20 34 14 32 8 C26 10 20 14 20 20Z" fill="#fff" opacity="0.75"/>
     <path d="M20 20 C20 30 26 34 32 32 C30 26 26 20 20 20Z" fill="#fff" opacity="0.6"/>
     <path d="M20 20 C10 20 6 26 8 32 C14 30 20 26 20 20Z" fill="#fff" opacity="0.45"/>`,
-  starGlyph: `<path d="${STAR_GLYPH_PATH}" fill="#fff"/>`,
+  starGlyph: `<path d="M20 3 L24.5 15.5 L38 16 L27.5 24 L31 37 L20 29.5 L9 37 L12.5 24 L2 16 L15.5 15.5 Z" fill="#fff"/>`,
   target: `
     <circle cx="20" cy="20" r="15" fill="#fff" opacity="0.25"/>
     <circle cx="20" cy="20" r="15" stroke="#fff" stroke-width="2" fill="none"/>
@@ -232,103 +175,87 @@ function escapeXml(str) {
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function renderGlyph(glyphKey, x, y, w, h, opacity = 1) {
+function renderGlyph(glyphKey, x, y, w, h) {
   const inner = GLYPHS[glyphKey];
   if (!inner) return "";
-  return `<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 40 40" opacity="${opacity}">${inner}</svg>`;
+  return `<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 40 40">${inner}</svg>`;
 }
 
-function renderCenterContent(badge) {
-  if (badge.centerLabel) {
-    const hasSub = !!badge.subLabel;
-    const glyphMarkup = badge.glyph ? renderGlyph(badge.glyph, 13, 3, 14, 11, 0.9) : "";
-    const numY = hasSub ? 25.5 : 23;
-    const len = String(badge.centerLabel).length;
-    const numSize = len > 5 ? 7.5 : len > 3 ? 9.5 : len > 2 ? 12 : 15;
-    const numMarkup = `<text x="20" y="${numY}" text-anchor="middle" dominant-baseline="middle" font-size="${numSize}" font-weight="800" fill="#fff" font-family="system-ui, -apple-system, sans-serif" paint-order="stroke" stroke="rgba(0,0,0,0.4)" stroke-width="2" stroke-linejoin="round">${escapeXml(badge.centerLabel)}</text>`;
-    const subMarkup = hasSub
-      ? `<text x="20" y="32.5" text-anchor="middle" font-size="5.5" font-weight="700" letter-spacing="0.5" fill="#fff" opacity="0.85" font-family="system-ui, -apple-system, sans-serif">${escapeXml(badge.subLabel)}</text>`
-      : "";
-    return glyphMarkup + numMarkup + subMarkup;
-  }
-  if (badge.glyph) {
-    return renderGlyph(badge.glyph, 8, 8, 24, 24, 0.95);
-  }
-  return "";
-}
-
-function svgDefs(uid, color) {
-  const light = lighten(color, 0.42);
-  const dark = darken(color, 0.38);
-  const shadowColor = darken(color, 0.6);
-  return `
-    <linearGradient id="g-${uid}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="${light}"/>
-      <stop offset="55%" stop-color="${color}"/>
-      <stop offset="100%" stop-color="${dark}"/>
-    </linearGradient>
-    <radialGradient id="hl-${uid}" cx="32%" cy="18%" r="65%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.7"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="sh-${uid}" x="-40%" y="-40%" width="180%" height="180%">
-      <feDropShadow dx="0" dy="1.1" stdDeviation="1" flood-color="${shadowColor}" flood-opacity="0.6"/>
-    </filter>
-  `;
-}
-
-/* 메달 뒤로 드리워진 리본 꼬리 (외곽 60x60 좌표계) */
-function ribbonMarkup(color) {
-  const dark1 = darken(color, 0.15);
-  const dark2 = darken(color, 0.4);
-  return `
-    <path d="M24 30 L32 30 L36 58 L28 50 L20 58 Z" fill="${dark2}" opacity="0.9"/>
-    <path d="M26 30 L34 30 L37 56 L30 49 L23 56 Z" fill="${dark1}"/>
-  `;
-}
-
-const SPARKLE_GEM_D = "M47 3 L48.7 6.7 L52.5 8 L48.7 9.3 L47 13 L45.3 9.3 L41.5 8 L45.3 6.7 Z";
-
-/* 마라톤 완주 메달 스타일 SVG 생성: 리본 + 카테고리별 메달 외곽(방패/불꽃원/
-   다이아몬드/육각형/별/번개/로제트/선버스트/팔각형/크레스트/실) + 티어
-   메탈릭 그라디언트 + 글로시 하이라이트 + 드롭섀도 + (고티어) 보석 반짝임. */
+/* ---------------- 마라톤 완주 메달 SVG 생성 (viewBox 0 0 80 95) ---------------- */
 export function renderBadgeIconSvg(badge, opts = {}) {
-  const size = opts.size || 60;
+  const w = opts.width || 64;
+  const h = opts.height || 76;
   const uid = badge.id.replace(/[^a-zA-Z0-9]/g, "");
-  const color = TIER_COLORS[badge.tier % TIER_COLORS.length];
-  const strokeColor = darken(color, 0.5);
-  const defs = svgDefs(uid, color);
+  const faceColors = CATEGORY_COLORS[badge.category] || CATEGORY_COLORS.pr;
+  const metal = TIER_COLORS[badge.tier % TIER_COLORS.length];
+  const metalLight = lighten(metal, 0.35);
+  const metalDark = darken(metal, 0.35);
+  const faceDark = darken(faceColors[0], 0.15);
 
-  let shapeMarkup;
-  const ring = RING_SHAPES[badge.shape];
-  if (ring) {
-    const spikes = ring.angles
-      .map(
-        (deg) =>
-          `<path d="${ring.petal}" transform="rotate(${deg} 20 20)" fill="url(#g-${uid})" stroke="${strokeColor}" stroke-width="0.5"/>`
-      )
-      .join("");
-    shapeMarkup = `
-      <g filter="url(#sh-${uid})">
-        <circle cx="20" cy="20" r="${ring.r}" fill="url(#g-${uid})" stroke="${strokeColor}" stroke-width="1.6"/>
-        ${spikes}
-      </g>
-      <circle cx="20" cy="20" r="${ring.r}" fill="url(#hl-${uid})"/>
-    `;
-  } else {
-    const d = SHAPES[badge.shape] || SHAPES.hexagon;
-    shapeMarkup = `
-      <g filter="url(#sh-${uid})">
-        <path d="${d}" fill="url(#g-${uid})" stroke="${strokeColor}" stroke-width="1.6" stroke-linejoin="round"/>
-      </g>
-      <path d="${d}" fill="url(#hl-${uid})"/>
-    `;
-  }
+  const hasValue = !!badge.centerLabel;
+  const ribbonText = badge.series || badge.name;
+  const ribbonLen = ribbonText.length;
+  const ribbonFontSize = ribbonLen > 9 ? 5.2 : ribbonLen > 6 ? 6.2 : 7.2;
 
-  const medalInner = `<svg viewBox="0 0 40 40" width="100%" height="100%"><defs>${defs}</defs>${shapeMarkup}${renderCenterContent(badge)}</svg>`;
-  const sparkle = badge.tier >= 4 ? `<path d="${SPARKLE_GEM_D}" fill="#fff" opacity="0.9"/>` : "";
+  const iconMarkup = badge.glyph
+    ? hasValue
+      ? renderGlyph(badge.glyph, 25, 13, 30, 24)
+      : renderGlyph(badge.glyph, 19, 12, 42, 36)
+    : "";
 
-  return `<svg viewBox="0 0 60 60" width="${size}" height="${size}" class="badge-svg">${ribbonMarkup(color)}<svg x="7" y="0" width="46" height="46">${medalInner}</svg>${sparkle}</svg>`;
+  const valueLen = hasValue ? `${badge.centerLabel}${badge.subLabel || ""}`.length : 0;
+  const valueFontSize = valueLen > 8 ? 7.5 : valueLen > 5 ? 9 : 11.5;
+  const valueMarkup = hasValue
+    ? `<text x="40" y="75.5" text-anchor="middle" dominant-baseline="middle" font-size="${valueFontSize}" font-weight="800" fill="#fff" font-family="system-ui, -apple-system, sans-serif" paint-order="stroke" stroke="rgba(0,0,0,0.35)" stroke-width="2" stroke-linejoin="round">${escapeXml(
+        `${badge.centerLabel}${badge.subLabel || ""}`.toUpperCase()
+      )}</text>`
+    : "";
+
+  return `<svg viewBox="0 0 80 95" width="${w}" height="${h}" class="badge-svg">
+    <defs>
+      <linearGradient id="face-${uid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${faceColors[1]}"/>
+        <stop offset="60%" stop-color="${faceColors[0]}"/>
+        <stop offset="100%" stop-color="${faceDark}"/>
+      </linearGradient>
+      <linearGradient id="rim-${uid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${metalLight}"/>
+        <stop offset="50%" stop-color="${metal}"/>
+        <stop offset="100%" stop-color="${metalDark}"/>
+      </linearGradient>
+      <linearGradient id="ribbon-${uid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#f2f2f4"/>
+        <stop offset="100%" stop-color="#c7c7cd"/>
+      </linearGradient>
+      <radialGradient id="hl-${uid}" cx="35%" cy="22%" r="60%">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.5"/>
+        <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+
+    <!-- 상단 고리 -->
+    <rect x="32" y="0" width="16" height="9" rx="3" fill="url(#rim-${uid})"/>
+
+    <!-- 메달 본체 -->
+    <circle cx="40" cy="48" r="35" fill="url(#face-${uid})"/>
+    <circle cx="40" cy="48" r="35" fill="url(#hl-${uid})"/>
+    <circle cx="40" cy="48" r="35" fill="none" stroke="url(#rim-${uid})" stroke-width="4"/>
+    <circle cx="40" cy="48" r="31.5" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="1"/>
+
+    <!-- 아이콘 -->
+    ${iconMarkup}
+
+    <!-- 리본 배너 -->
+    <path d="M0 47 L13 41 L13 61 L0 67 Z" fill="${darken("#c7c7cd", 0.15)}"/>
+    <path d="M80 47 L67 41 L67 61 L80 67 Z" fill="${darken("#c7c7cd", 0.15)}"/>
+    <rect x="8" y="44" width="64" height="17" fill="url(#ribbon-${uid})"/>
+    <text x="40" y="55" text-anchor="middle" dominant-baseline="middle" font-size="${ribbonFontSize}" font-weight="800" fill="#2b2b33" font-family="system-ui, -apple-system, sans-serif" letter-spacing="0.2">${escapeXml(
+      ribbonText.toUpperCase()
+    )}</text>
+
+    <!-- 수치 -->
+    ${valueMarkup}
+  </svg>`;
 }
 
 /* 미달성 뱃지의 모달용 진행률 문구 ("23 / 50km" 등) */
@@ -1017,7 +944,6 @@ function progressFromCount(count, target, unit) {
 function finalize(list) {
   return list.map((b) => ({
     ...b,
-    shape: CATEGORY_SHAPE[b.category],
     achieved: !!b.achievedDate,
   }));
 }
@@ -1025,11 +951,12 @@ function finalize(list) {
 function buildBadges(data) {
   const list = [];
 
-  /* ============ 💪 PR 달성 (20개, 방패형) ============ */
+  /* ============ 💪 PR 달성 (20개) ============ */
   [40, 60, 80, 100, 120].forEach((t, i) => {
     list.push({
       id: `pr-bench-${t}`,
       category: "pr",
+      series: "벤치프레스",
       tier: i,
       glyph: "barbellBench",
       centerLabel: `${t}`,
@@ -1044,6 +971,7 @@ function buildBadges(data) {
     list.push({
       id: `pr-squat-${t}`,
       category: "pr",
+      series: "스쿼트",
       tier: i,
       glyph: "barbellSquat",
       centerLabel: `${t}`,
@@ -1058,6 +986,7 @@ function buildBadges(data) {
     list.push({
       id: `pr-deadlift-${t}`,
       category: "pr",
+      series: "데드리프트",
       tier: i,
       glyph: "barbellDeadlift",
       centerLabel: `${t}`,
@@ -1072,6 +1001,7 @@ function buildBadges(data) {
     list.push({
       id: `pr-count-${t}`,
       category: "pr",
+      series: "PR 갱신",
       tier: i,
       glyph: "dumbbell",
       centerLabel: `${t}`,
@@ -1083,15 +1013,16 @@ function buildBadges(data) {
     });
   });
 
-  /* ============ 🔥 연속 운동 streak (20개, 원형+불꽃 테두리) ============ */
+  /* ============ 🔥 연속 운동 streak (20개) ============ */
   [3, 7, 14, 30, 60, 100].forEach((t, i) => {
     list.push({
       id: `streak-days-${t}`,
       category: "streak",
+      series: "연속 운동",
       tier: Math.min(i, TIER_COLORS.length - 1),
       glyph: "flame",
       centerLabel: `${t}`,
-      subLabel: "DAYS",
+      subLabel: "일",
       name: `연속 운동 ${t}일`,
       description: `${t}일 연속으로 운동을 기록했어요`,
       achievedDate: firstReaching(data.dailyStreak, t),
@@ -1102,10 +1033,11 @@ function buildBadges(data) {
     list.push({
       id: `streak-weekly-${t}`,
       category: "streak",
+      series: "주간 달성",
       tier: i,
       glyph: "calendar",
       centerLabel: `${t}`,
-      subLabel: "WEEK",
+      subLabel: "회/주",
       name: `주 ${t}회 달성`,
       description: `한 주에 ${t}회 이상 운동했어요`,
       achievedDate: firstReaching(data.weeklyCounts, t),
@@ -1116,10 +1048,11 @@ function buildBadges(data) {
     list.push({
       id: `streak-weekly3-${t}`,
       category: "streak",
+      series: "주 3회 연속",
       tier: i === 0 ? 1 : 3,
       glyph: "flame",
       centerLabel: `${t}`,
-      subLabel: "WEEKS",
+      subLabel: "주",
       name: `주 3회 ${t}주 연속`,
       description: `주 3회 이상 운동을 ${t}주 연속 달성했어요`,
       achievedDate: firstReaching(data.weeklyStreak3, t),
@@ -1130,10 +1063,11 @@ function buildBadges(data) {
     list.push({
       id: `streak-monthly-${t}`,
       category: "streak",
+      series: "월간 달성",
       tier: i,
       glyph: "calendar",
       centerLabel: `${t}`,
-      subLabel: "MONTH",
+      subLabel: "회/월",
       name: `한 달 ${t}회`,
       description: `한 달에 ${t}회 이상 운동했어요`,
       achievedDate: firstReaching(data.monthlyCounts, t),
@@ -1144,10 +1078,11 @@ function buildBadges(data) {
     list.push({
       id: `streak-total-${t}`,
       category: "streak",
+      series: "누적 운동",
       tier: 2 + i,
       glyph: "calendar",
       centerLabel: `${t}`,
-      subLabel: "TOTAL",
+      subLabel: "회",
       name: `누적 운동 ${t}회`,
       description: `누적 운동 일수 ${t}회를 달성했어요`,
       achievedDate: findNthDate(data.allWorkoutDatesSorted, t),
@@ -1155,14 +1090,13 @@ function buildBadges(data) {
     });
   });
 
-  /* ============ 🏃 유산소 (20개, 다이아몬드형) ============ */
+  /* ============ 🏃 유산소 (20개) ============ */
   list.push({
     id: "cardio-first-run",
     category: "cardio",
+    series: "첫 러닝",
     tier: 0,
     glyph: "shoe",
-    centerLabel: null,
-    subLabel: null,
     name: "첫 러닝",
     description: "첫 러닝 기록을 남겼어요",
     achievedDate: data.runningLogs.length ? data.runningLogs[0].date : null,
@@ -1171,6 +1105,7 @@ function buildBadges(data) {
     list.push({
       id: `cardio-cum-dist-${t}`,
       category: "cardio",
+      series: "누적 러닝",
       tier: i,
       glyph: "shoe",
       centerLabel: `${t}`,
@@ -1188,10 +1123,11 @@ function buildBadges(data) {
       list.push({
         id: `cardio-single-dist-${t}`,
         category: "cardio",
+        series: "단일 러닝",
         tier: i,
         glyph: "shoe",
         centerLabel: `${t}`,
-        subLabel: t === 21 ? "HALF" : "km",
+        subLabel: t === 21 ? "km 하프" : "km",
         name: t === 21 ? "하프마라톤 완주" : `단일 러닝 ${t}km`,
         description: t === 21 ? "한 번에 21km(하프마라톤)를 달렸어요" : `한 번에 ${t}km를 달렸어요`,
         achievedDate: hit ? hit.date : null,
@@ -1211,10 +1147,10 @@ function buildBadges(data) {
       list.push({
         id: `cardio-pace-${t}`,
         category: "cardio",
+        series: "페이스",
         tier: i,
         glyph: "heartbeat",
         centerLabel: formatPaceLabel(t),
-        subLabel: "PACE",
         name: `페이스 ${label} 이내`,
         description: `평균 페이스 ${label} 이내로 러닝했어요`,
         achievedDate: hit ? hit.date : null,
@@ -1225,10 +1161,9 @@ function buildBadges(data) {
   list.push({
     id: "cardio-first-stair",
     category: "cardio",
+    series: "첫 천국의계단",
     tier: 0,
     glyph: "stairs",
-    centerLabel: null,
-    subLabel: null,
     name: "천국의계단 첫 기록",
     description: "천국의계단 운동을 처음 기록했어요",
     achievedDate: data.stairLogs.length ? data.stairLogs[0].date : null,
@@ -1240,6 +1175,7 @@ function buildBadges(data) {
       list.push({
         id: `cardio-stair-level-${t}`,
         category: "cardio",
+        series: "천국의계단 단계",
         tier: 2 + i,
         glyph: "stairs",
         centerLabel: `${t}`,
@@ -1255,10 +1191,11 @@ function buildBadges(data) {
     list.push({
       id: `cardio-stair-min-${t}`,
       category: "cardio",
+      series: "천국의계단 누적",
       tier: 3 + i,
       glyph: "stairs",
       centerLabel: `${t}`,
-      subLabel: "MIN",
+      subLabel: "분",
       name: `천국의계단 누적 ${t}분`,
       description: `천국의계단 누적 운동시간 ${t}분을 달성했어요`,
       achievedDate: firstReaching(data.cumulativeStairMinutes, t),
@@ -1266,14 +1203,13 @@ function buildBadges(data) {
     });
   });
 
-  /* ============ 📉 인바디 변화 (20개, 육각형) ============ */
+  /* ============ 📉 인바디 변화 (20개) ============ */
   list.push({
     id: "inbody-first",
     category: "inbody",
+    series: "첫 인바디",
     tier: 0,
     glyph: "scale",
-    centerLabel: null,
-    subLabel: null,
     name: "첫 인바디 기록",
     description: "첫 인바디 기록을 남겼어요",
     achievedDate: data.inbodySorted.length ? data.inbodySorted[0].date : null,
@@ -1282,6 +1218,7 @@ function buildBadges(data) {
     list.push({
       id: `inbody-weight-loss-${t}`,
       category: "inbody",
+      series: "체중 감량",
       tier: Math.min(i, TIER_COLORS.length - 1),
       glyph: "scale",
       centerLabel: `-${t}`,
@@ -1296,6 +1233,7 @@ function buildBadges(data) {
     list.push({
       id: `inbody-bodyfat-${t}`,
       category: "inbody",
+      series: "체지방률 감소",
       tier: i,
       glyph: "bodyfatDrop",
       centerLabel: `-${t}`,
@@ -1310,6 +1248,7 @@ function buildBadges(data) {
     list.push({
       id: `inbody-muscle-${t}`,
       category: "inbody",
+      series: "골격근량 증가",
       tier: i,
       glyph: "muscle",
       centerLabel: `+${t}`,
@@ -1325,10 +1264,10 @@ function buildBadges(data) {
     list.push({
       id: "inbody-bmi-normal",
       category: "inbody",
+      series: "BMI 정상범위",
       tier: 2,
       glyph: "bmiCheck",
       centerLabel: "BMI",
-      subLabel: null,
       name: "BMI 정상범위 진입",
       description: "BMI가 정상범위(18.5~24.9)에 진입했어요",
       achievedDate: hit ? hit.date : null,
@@ -1338,6 +1277,7 @@ function buildBadges(data) {
     list.push({
       id: `inbody-count-${t}`,
       category: "inbody",
+      series: "인바디 기록",
       tier: i,
       glyph: "scale",
       centerLabel: `${t}`,
@@ -1349,15 +1289,16 @@ function buildBadges(data) {
     });
   });
 
-  /* ============ 🥤 생활습관 (10개, 별형) ============ */
+  /* ============ 🥤 생활습관 (10개) ============ */
   [7, 14, 30].forEach((t, i) => {
     list.push({
       id: `life-protein-streak-${t}`,
       category: "lifestyle",
+      series: "프로틴 연속",
       tier: 1 + i,
       glyph: "bottle",
       centerLabel: `${t}`,
-      subLabel: "DAYS",
+      subLabel: "일",
       name: `프로틴 연속 ${t}일`,
       description: `프로틴을 ${t}일 연속 섭취했어요`,
       achievedDate: firstReaching(data.proteinStreak, t),
@@ -1368,6 +1309,7 @@ function buildBadges(data) {
     list.push({
       id: `life-protein-total-${t}`,
       category: "lifestyle",
+      series: "프로틴 누적",
       tier: 1 + i * 2,
       glyph: "bottle",
       centerLabel: `${t}`,
@@ -1382,10 +1324,11 @@ function buildBadges(data) {
     list.push({
       id: `life-no-drink-${t}`,
       category: "lifestyle",
+      series: "금주 연속",
       tier: 1 + i,
       glyph: "glassX",
       centerLabel: `${t}`,
-      subLabel: "DAYS",
+      subLabel: "일",
       name: `금주 연속 ${t}일`,
       description: `${t}일 연속 금주를 달성했어요`,
       achievedDate: firstReaching(data.noDrinkStreak, t),
@@ -1396,6 +1339,7 @@ function buildBadges(data) {
     list.push({
       id: `life-workout-protein-${t}`,
       category: "lifestyle",
+      series: "운동+프로틴",
       tier: 2 + i * 2,
       glyph: "heart",
       centerLabel: `${t}`,
@@ -1407,15 +1351,16 @@ function buildBadges(data) {
     });
   });
 
-  /* ============ ⚡ 볼륨 & 칼로리 (10개, 번개형) ============ */
+  /* ============ ⚡ 볼륨 & 칼로리 (10개) ============ */
   [10000, 50000, 100000, 300000, 500000].forEach((t, i) => {
     list.push({
       id: `volume-total-${t}`,
       category: "volume",
+      series: "총 볼륨",
       tier: i,
-      glyph: null,
-      centerLabel: `${t / 1000}t`,
-      subLabel: "VOL",
+      glyph: "boltGlyph",
+      centerLabel: `${t / 1000}`,
+      subLabel: "t",
       name: `총 볼륨 ${t.toLocaleString()}kg`,
       description: `누적 운동 볼륨 ${t.toLocaleString()}kg을 달성했어요`,
       achievedDate: firstReaching(data.cumulativeVolume, t),
@@ -1426,10 +1371,11 @@ function buildBadges(data) {
     list.push({
       id: `volume-calories-${t}`,
       category: "volume",
+      series: "총 칼로리",
       tier: i,
-      glyph: null,
-      centerLabel: `${t / 1000}k`,
-      subLabel: "KCAL",
+      glyph: "trophy",
+      centerLabel: `${t / 1000}`,
+      subLabel: "K",
       name: `총 칼로리 ${t.toLocaleString()}kcal`,
       description: `누적 소모 칼로리 ${t.toLocaleString()}kcal을 달성했어요`,
       achievedDate: firstReaching(data.cumulativeCalories, t),
@@ -1437,10 +1383,11 @@ function buildBadges(data) {
     });
   });
 
-  /* ============ 🎭 운동 스타일 & 개성 (10개, 로제트형) ============ */
+  /* ============ 🎭 운동 스타일 & 개성 (10개) ============ */
   list.push({
     id: "style-dawn",
     category: "style",
+    series: "새벽반",
     tier: 1,
     glyph: "sunrise",
     name: "새벽반",
@@ -1450,6 +1397,7 @@ function buildBadges(data) {
   list.push({
     id: "style-night-owl",
     category: "style",
+    series: "야행성",
     tier: 5,
     glyph: "moon",
     name: "야행성",
@@ -1459,10 +1407,11 @@ function buildBadges(data) {
   list.push({
     id: "style-weekend-warrior",
     category: "style",
+    series: "주말전사",
     tier: 3,
     glyph: "flag",
     centerLabel: "5",
-    subLabel: "WEEKS",
+    subLabel: "주",
     name: "주말전사",
     description: "주말이 낀 주를 5주 연속으로 운동했어요",
     achievedDate: firstReaching(data.weekendStreakPoints, 5),
@@ -1471,6 +1420,7 @@ function buildBadges(data) {
   list.push({
     id: "style-lunch-runner",
     category: "style",
+    series: "점심러너",
     tier: 2,
     glyph: "sunNoon",
     name: "점심러너",
@@ -1480,6 +1430,7 @@ function buildBadges(data) {
   list.push({
     id: "style-rain-or-shine",
     category: "style",
+    series: "비가 와도",
     tier: 1,
     glyph: "raindrop",
     name: "비가 와도",
@@ -1489,10 +1440,11 @@ function buildBadges(data) {
   list.push({
     id: "style-monday-slayer",
     category: "style",
+    series: "월요병 극복",
     tier: 2,
     glyph: "calendar",
     centerLabel: "10",
-    subLabel: "MON",
+    subLabel: "월",
     name: "월요병 극복",
     description: "월요일에 10회 운동했어요",
     achievedDate: findNthDate(data.mondayDatesSorted, 10),
@@ -1501,10 +1453,11 @@ function buildBadges(data) {
   list.push({
     id: "style-tgif",
     category: "style",
+    series: "불금 운동",
     tier: 2,
     glyph: "flame",
     centerLabel: "10",
-    subLabel: "FRI",
+    subLabel: "금",
     name: "불금 운동",
     description: "금요일에 10회 운동했어요",
     achievedDate: findNthDate(data.fridayDatesSorted, 10),
@@ -1513,6 +1466,7 @@ function buildBadges(data) {
   list.push({
     id: "style-solo-fighter",
     category: "style",
+    series: "혼자서도 잘해요",
     tier: 3,
     glyph: "dumbbell",
     centerLabel: "30",
@@ -1525,6 +1479,7 @@ function buildBadges(data) {
   list.push({
     id: "style-planner",
     category: "style",
+    series: "계획형 인간",
     tier: 2,
     glyph: "checklist",
     centerLabel: "5",
@@ -1542,6 +1497,7 @@ function buildBadges(data) {
   list.push({
     id: "style-record-keeper",
     category: "style",
+    series: "기록왕",
     tier: 3,
     glyph: "pencil",
     centerLabel: "50",
@@ -1552,10 +1508,11 @@ function buildBadges(data) {
     progress: progressFromCount(data.memosSorted.length, 50, "회"),
   });
 
-  /* ============ 💫 특별한 순간 (10개, 선버스트형) ============ */
+  /* ============ 💫 특별한 순간 (10개) ============ */
   list.push({
     id: "special-first-step",
     category: "special",
+    series: "첫 발걸음",
     tier: 2,
     glyph: "footprint",
     name: "첫 발걸음",
@@ -1565,10 +1522,11 @@ function buildBadges(data) {
   list.push({
     id: "special-miracle-month",
     category: "special",
+    series: "한 달의 기적",
     tier: 3,
     glyph: "sparkle",
     centerLabel: "10",
-    subLabel: "30일",
+    subLabel: "/30일",
     name: "한 달의 기적",
     description: "첫 운동 후 30일 안에 10회를 달성했어요",
     achievedDate: data.within30OfFirst.length >= 10 ? data.within30OfFirst[9] : null,
@@ -1577,6 +1535,7 @@ function buildBadges(data) {
   list.push({
     id: "special-change-begins",
     category: "special",
+    series: "변화의 시작",
     tier: 2,
     glyph: "scale",
     name: "변화의 시작",
@@ -1586,6 +1545,7 @@ function buildBadges(data) {
   list.push({
     id: "special-consistency-90",
     category: "special",
+    series: "꾸준함의 힘",
     tier: 3,
     glyph: "calendar",
     centerLabel: "90",
@@ -1598,6 +1558,7 @@ function buildBadges(data) {
   list.push({
     id: "special-half-year",
     category: "special",
+    series: "반년의 여정",
     tier: 4,
     glyph: "calendar",
     centerLabel: "180",
@@ -1610,6 +1571,7 @@ function buildBadges(data) {
   list.push({
     id: "special-year-miracle",
     category: "special",
+    series: "1년의 기적",
     tier: 5,
     glyph: "trophy",
     centerLabel: "365",
@@ -1622,6 +1584,7 @@ function buildBadges(data) {
   list.push({
     id: "special-all-seasons",
     category: "special",
+    series: "계절을 넘어",
     tier: 4,
     glyph: "seasons",
     name: "계절을 넘어",
@@ -1631,6 +1594,7 @@ function buildBadges(data) {
   list.push({
     id: "special-all-rounder",
     category: "special",
+    series: "올라운더",
     tier: 3,
     glyph: "starGlyph",
     name: "올라운더",
@@ -1640,6 +1604,7 @@ function buildBadges(data) {
   list.push({
     id: "special-body-project",
     category: "special",
+    series: "몸짱 프로젝트",
     tier: 2,
     glyph: "target",
     name: "몸짱 프로젝트",
@@ -1649,6 +1614,7 @@ function buildBadges(data) {
   list.push({
     id: "special-data-geek",
     category: "special",
+    series: "데이터 덕후",
     tier: 1,
     glyph: "chart",
     centerLabel: "10",
@@ -1659,10 +1625,11 @@ function buildBadges(data) {
     progress: progressFromCount(data.inbodySorted.length, 10, "회"),
   });
 
-  /* ============ 🏋️ 운동량 마일스톤 (10개, 팔각형) ============ */
+  /* ============ 🏋️ 운동량 마일스톤 (10개) ============ */
   list.push({
     id: "milestone-first-set",
     category: "milestone",
+    series: "첫 세트",
     tier: 0,
     glyph: "dumbbell",
     name: "첫 세트",
@@ -1673,6 +1640,7 @@ function buildBadges(data) {
     list.push({
       id: `milestone-set-${t}`,
       category: "milestone",
+      series: "누적 세트",
       tier: [1, 3, 5][i],
       glyph: "dumbbell",
       centerLabel: `${t}`,
@@ -1686,10 +1654,11 @@ function buildBadges(data) {
   list.push({
     id: "milestone-daily-10-sets",
     category: "milestone",
+    series: "오늘만큼은",
     tier: 2,
     glyph: "dumbbell",
     centerLabel: "10",
-    subLabel: "일일",
+    subLabel: "세트",
     name: "오늘만큼은",
     description: "하루에 10세트 이상 기록했어요",
     achievedDate: firstReaching(data.dailySetTotals, 10),
@@ -1698,10 +1667,11 @@ function buildBadges(data) {
   list.push({
     id: "milestone-volume-king",
     category: "milestone",
+    series: "볼륨킹",
     tier: 2,
     glyph: "boltGlyph",
-    centerLabel: "5t",
-    subLabel: "일일",
+    centerLabel: "5",
+    subLabel: "t",
     name: "볼륨킹",
     description: "하루 총 볼륨 5,000kg 이상을 기록했어요",
     achievedDate: firstReaching(data.dailyVolumeTotals, 5000),
@@ -1710,10 +1680,11 @@ function buildBadges(data) {
   list.push({
     id: "milestone-super-volume",
     category: "milestone",
+    series: "슈퍼볼륨",
     tier: 4,
     glyph: "boltGlyph",
-    centerLabel: "10t",
-    subLabel: "일일",
+    centerLabel: "10",
+    subLabel: "t",
     name: "슈퍼볼륨",
     description: "하루 총 볼륨 10,000kg 이상을 기록했어요",
     achievedDate: firstReaching(data.dailyVolumeTotals, 10000),
@@ -1722,6 +1693,7 @@ function buildBadges(data) {
   list.push({
     id: "milestone-muscle-factory",
     category: "milestone",
+    series: "근육공장",
     tier: 2,
     glyph: "muscle",
     centerLabel: "10",
@@ -1734,6 +1706,7 @@ function buildBadges(data) {
   list.push({
     id: "milestone-equipment-master",
     category: "milestone",
+    series: "기구마스터",
     tier: 3,
     glyph: "dumbbell",
     centerLabel: "20",
@@ -1746,6 +1719,7 @@ function buildBadges(data) {
   list.push({
     id: "milestone-all-in",
     category: "milestone",
+    series: "올인",
     tier: 3,
     glyph: "heartbeat",
     name: "올인",
@@ -1753,14 +1727,15 @@ function buildBadges(data) {
     achievedDate: data.allInDate,
   });
 
-  /* ============ 🌟 챌린지 (10개, 크레스트형) ============ */
+  /* ============ 🌟 챌린지 (10개) ============ */
   list.push({
     id: "challenge-30-days",
     category: "challenge",
+    series: "30일 챌린지",
     tier: 4,
     glyph: "flame",
     centerLabel: "30",
-    subLabel: "DAYS",
+    subLabel: "일",
     name: "30일 챌린지",
     description: "30일 동안 매일 운동을 기록했어요",
     achievedDate: firstReaching(data.dailyStreak, 30),
@@ -1769,10 +1744,11 @@ function buildBadges(data) {
   list.push({
     id: "challenge-no-pain-no-gain",
     category: "challenge",
+    series: "노페인노게인",
     tier: 3,
     glyph: "muscle",
     centerLabel: "3",
-    subLabel: "×7일",
+    subLabel: "회",
     name: "노페인노게인",
     description: "연속 7일 운동을 3번 달성했어요",
     achievedDate: firstReaching(data.streak7Completions, 3),
@@ -1781,10 +1757,11 @@ function buildBadges(data) {
   list.push({
     id: "challenge-fat-burner",
     category: "challenge",
+    series: "체지방버너",
     tier: 3,
     glyph: "bodyfatDrop",
-    centerLabel: "10k",
-    subLabel: "KCAL",
+    centerLabel: "10",
+    subLabel: "K",
     name: "체지방버너",
     description: "한 달 누적 칼로리 소모 10,000kcal을 달성했어요",
     achievedDate: firstReaching(data.monthlyCalorieTotals, 10000),
@@ -1793,6 +1770,7 @@ function buildBadges(data) {
   list.push({
     id: "challenge-muscle-evangelist",
     category: "challenge",
+    series: "근육전도사",
     tier: 4,
     glyph: "muscle",
     name: "근육전도사",
@@ -1802,6 +1780,7 @@ function buildBadges(data) {
   list.push({
     id: "challenge-perfect-week",
     category: "challenge",
+    series: "퍼펙트위크",
     tier: 3,
     glyph: "checklist",
     name: "퍼펙트위크",
@@ -1811,10 +1790,11 @@ function buildBadges(data) {
   list.push({
     id: "challenge-iron-will",
     category: "challenge",
+    series: "철의 의지",
     tier: 4,
     glyph: "calendar",
     centerLabel: "4",
-    subLabel: "WEEKS",
+    subLabel: "주",
     name: "철의 의지",
     description: "운동하기 싫은 월요일에 4주 연속 운동했어요",
     achievedDate: firstReaching(data.mondayStreakPoints, 4),
@@ -1823,6 +1803,7 @@ function buildBadges(data) {
   list.push({
     id: "challenge-speed-runner",
     category: "challenge",
+    series: "스피드러너",
     tier: 3,
     glyph: "shoe",
     centerLabel: "100",
@@ -1835,6 +1816,7 @@ function buildBadges(data) {
   list.push({
     id: "challenge-new-year",
     category: "challenge",
+    series: "새해결심",
     tier: 2,
     glyph: "sparkle",
     centerLabel: "10",
@@ -1847,6 +1829,7 @@ function buildBadges(data) {
   list.push({
     id: "challenge-summer-ready",
     category: "challenge",
+    series: "여름준비",
     tier: 2,
     glyph: "sunNoon",
     centerLabel: "20",
@@ -1859,6 +1842,7 @@ function buildBadges(data) {
   list.push({
     id: "challenge-winter-overcome",
     category: "challenge",
+    series: "겨울극복",
     tier: 2,
     glyph: "snowflake",
     centerLabel: "15",
@@ -1869,10 +1853,11 @@ function buildBadges(data) {
     progress: { current: data.winterMilestone.bestCount, target: 15, unit: "회" },
   });
 
-  /* ============ 🎪 유머 / 숨겨진 뱃지 (10개, 실형) ============ */
+  /* ============ 🎪 유머 / 숨겨진 뱃지 (10개) ============ */
   list.push({
     id: "hidden-three-day-monk",
     category: "hidden",
+    series: "작심삼일",
     tier: 1,
     glyph: "flame",
     name: "작심삼일",
@@ -1882,6 +1867,7 @@ function buildBadges(data) {
   list.push({
     id: "hidden-comeback",
     category: "hidden",
+    series: "다시 시작",
     tier: 2,
     glyph: "footprint",
     name: "다시 시작",
@@ -1891,6 +1877,7 @@ function buildBadges(data) {
   list.push({
     id: "hidden-perfectionist",
     category: "hidden",
+    series: "완벽주의자",
     tier: 3,
     glyph: "checklist",
     name: "완벽주의자",
@@ -1900,6 +1887,7 @@ function buildBadges(data) {
   list.push({
     id: "hidden-slow-is-ok",
     category: "hidden",
+    series: "천천히 가도 돼",
     tier: 1,
     glyph: "shoe",
     name: "천천히 가도 돼",
@@ -1910,6 +1898,7 @@ function buildBadges(data) {
   list.push({
     id: "hidden-bodyweight-only",
     category: "hidden",
+    series: "저도 몰랐어요",
     tier: 2,
     glyph: "muscle",
     name: "저도 몰랐어요",
@@ -1920,6 +1909,7 @@ function buildBadges(data) {
   list.push({
     id: "hidden-too-heavy",
     category: "hidden",
+    series: "무거워",
     tier: 3,
     glyph: "dumbbell",
     name: "무거워",
@@ -1929,6 +1919,7 @@ function buildBadges(data) {
   list.push({
     id: "hidden-surprise-pr",
     category: "hidden",
+    series: "깜짝 놀랐지",
     tier: 4,
     glyph: "sparkle",
     name: "깜짝 놀랐지",
@@ -1938,6 +1929,7 @@ function buildBadges(data) {
   list.push({
     id: "hidden-rest-matters",
     category: "hidden",
+    series: "오늘은 쉬어요",
     tier: 0,
     glyph: "moon",
     name: "오늘은 쉬어요",
@@ -1947,10 +1939,11 @@ function buildBadges(data) {
   list.push({
     id: "hidden-steady-turtle",
     category: "hidden",
+    series: "꾸준한 거북이",
     tier: 4,
     glyph: "turtle",
     centerLabel: "26",
-    subLabel: "WEEKS",
+    subLabel: "주",
     name: "꾸준한 거북이",
     description: "느려도 꾸준하면 결국 도착해요",
     achievedDate: firstReaching(data.turtleStreakPoints, 26),
@@ -1959,6 +1952,7 @@ function buildBadges(data) {
   list.push({
     id: "hidden-legend-begins",
     category: "hidden",
+    series: "전설의 시작",
     tier: 5,
     glyph: "trophy",
     name: "전설의 시작",

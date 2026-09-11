@@ -926,7 +926,7 @@ input[type="range"] {
 }
 
 .badge-section {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .badge-section-header {
@@ -947,135 +947,65 @@ input[type="range"] {
   color: var(--text-dim);
 }
 
-.badge-icon-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+.badge-series-row {
+  margin-bottom: 12px;
 }
 
-.badge-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  aspect-ratio: 1;
-  padding: 4px;
+.badge-series-row:last-child {
+  margin-bottom: 0;
+}
+
+.badge-series-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin: 0 0 6px 2px;
+}
+
+.badge-series-scroll {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.badge-series-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* 박스/카드 외곽선 없이 메달 SVG만 표시 */
+.badge-card {
+  flex: none;
+  width: 64px;
+  height: 76px;
+  padding: 0;
+  border: none;
+  background: transparent;
   font-family: inherit;
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-}
-
-.badge-card.achieved {
-  border-color: var(--mint-dim);
+  transition: transform 0.15s ease;
 }
 
 .badge-card:active {
-  transform: scale(0.95);
+  transform: scale(0.96);
 }
 
-.badge-card.achieved:hover {
-  transform: scale(1.15);
-  box-shadow: 0 8px 26px rgba(255, 215, 0, 0.45), 0 0 22px rgba(255, 255, 255, 0.25);
-  z-index: 2;
+.badge-card:hover {
+  transform: scale(1.08);
 }
 
-.badge-icon-wrap {
-  position: relative;
+.badge-card .badge-svg {
   width: 100%;
   height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
 }
 
-.badge-icon {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.badge-icon svg {
-  width: 100%;
-  height: 100%;
-}
-
-/* 미달성: 전체 grayscale + 20% 불투명도 */
-.badge-card:not(.achieved) .badge-icon {
+/* 미달성: 전체 grayscale + 40% 불투명도, 달성: 풀컬러(정적) */
+.badge-card:not(.achieved) .badge-svg {
   filter: grayscale(1);
-  opacity: 0.2;
-}
-
-.badge-lock-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  filter: none;
-  opacity: 1;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
-  pointer-events: none;
-}
-
-/* 달성 뱃지 반짝임: 2초 주기로 카드를 가로지르는 대각선 하이라이트 스윕 */
-.badge-card.achieved .badge-icon-wrap::after {
-  content: "";
-  position: absolute;
-  inset: -6px;
-  background: linear-gradient(120deg, transparent 35%, rgba(255, 255, 255, 0.6) 50%, transparent 65%);
-  background-size: 220% 220%;
-  background-position: -40% -40%;
-  animation: badge-shimmer 2s ease-in-out infinite;
-  pointer-events: none;
-  mix-blend-mode: overlay;
-}
-
-@keyframes badge-shimmer {
-  0%, 15% { background-position: -60% -60%; }
-  55%, 100% { background-position: 60% 60%; }
-}
-
-/* 레전더리 카테고리(특별/챌린지/히든) 달성 뱃지: 무지개 hue-rotate shimmer */
-.badge-card.achieved.badge-legendary .badge-icon {
-  animation: badge-rainbow 4s linear infinite;
-}
-
-@keyframes badge-rainbow {
-  0% { filter: hue-rotate(0deg) saturate(1.15); }
-  100% { filter: hue-rotate(360deg) saturate(1.15); }
-}
-
-/* 신규 달성 시 1초 bounce + glow burst */
-.badge-card.badge-just-achieved .badge-icon-wrap {
-  animation: badge-bounce 1s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-@keyframes badge-bounce {
-  0% { transform: scale(1); }
-  30% { transform: scale(1.35); }
-  55% { transform: scale(0.9); }
-  75% { transform: scale(1.15); }
-  100% { transform: scale(1); }
-}
-
-.badge-card.badge-just-achieved .badge-icon-wrap::before {
-  content: "";
-  position: absolute;
-  inset: -14px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.85), transparent 70%);
-  animation: badge-glow-burst 1s ease-out;
-  pointer-events: none;
-}
-
-@keyframes badge-glow-burst {
-  0% { opacity: 1; transform: scale(0.3); }
-  100% { opacity: 0; transform: scale(2); }
+  opacity: 0.4;
 }
 
 /* 뱃지 상세 모달 */
@@ -1085,19 +1015,20 @@ input[type="range"] {
 }
 
 .badge-modal-icon {
-  width: 100px;
-  height: 100px;
+  width: 120px;
+  height: 142px;
   margin: 4px auto 0;
 }
 
-.badge-modal-icon svg {
-  width: 100px;
-  height: 100px;
+.badge-modal-icon .badge-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
-.badge-modal-icon:not(.achieved) {
+.badge-modal-icon:not(.achieved) .badge-svg {
   filter: grayscale(1);
-  opacity: 0.2;
+  opacity: 0.4;
 }
 
 .badge-modal-name {
