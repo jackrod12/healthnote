@@ -181,21 +181,38 @@ function renderGlyph(glyphKey, x, y, w, h) {
   return `<svg x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" viewBox="0 0 40 40">${inner}</svg>`;
 }
 
+function escapeXml(str) {
+  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 /* ---------------- 포켓몬 뱃지 스타일 SVG 생성 (viewBox 0 0 60 60) ---------------- */
 export function renderBadgeIconSvg(badge, opts = {}) {
-  const w = opts.width || 56;
-  const h = opts.height || 56;
+  const w = opts.width || 48;
+  const h = opts.height || 48;
   const tierIndex = Math.min(Math.max(badge.tier ?? 0, 0), TIER_PALETTE.length - 1);
   const palette = TIER_PALETTE[tierIndex];
 
+  const hasValue = !!badge.centerLabel;
   const scale = badge.iconScale || 1;
-  const iconSize = 34 * scale;
-  const iconOffset = (60 - iconSize) / 2;
-  const iconMarkup = badge.glyph ? renderGlyph(badge.glyph, iconOffset, iconOffset, iconSize, iconSize) : "";
+  // 시리즈 뱃지(수치 있음)는 아이콘을 위로 올려 하단에 수치 텍스트 자리를 확보
+  const iconSize = (hasValue ? 28 : 34) * scale;
+  const iconCenterY = hasValue ? 23 : 30;
+  const iconOffsetX = (60 - iconSize) / 2;
+  const iconOffsetY = iconCenterY - iconSize / 2;
+  const iconMarkup = badge.glyph ? renderGlyph(badge.glyph, iconOffsetX, iconOffsetY, iconSize, iconSize) : "";
+
+  const valueText = hasValue ? `${badge.centerLabel}${badge.subLabel || ""}` : "";
+  const valueFontSize = valueText.length > 6 ? 7 : valueText.length > 4 ? 8 : 9;
+  const valueMarkup = hasValue
+    ? `<text x="30" y="47" text-anchor="middle" dominant-baseline="middle" font-size="${valueFontSize}" font-weight="800" fill="#fff" font-family="system-ui, -apple-system, sans-serif" paint-order="stroke" stroke="rgba(0,0,0,0.4)" stroke-width="1.6" stroke-linejoin="round">${escapeXml(
+        valueText
+      )}</text>`
+    : "";
 
   return `<svg viewBox="0 0 60 60" width="${w}" height="${h}" class="badge-svg">
     <circle cx="30" cy="30" r="27" fill="${palette.bg}" stroke="${palette.border}" stroke-width="3"/>
     ${iconMarkup}
+    ${valueMarkup}
   </svg>`;
 }
 
@@ -946,7 +963,7 @@ function buildBadges(data) {
       tier: i,
       glyph: "trophy",
       centerLabel: `${t}`,
-      subLabel: "PR",
+      subLabel: "회",
       name: `PR ${t}회 갱신`,
       description: `개인 최고 기록을 총 ${t}회 갱신했어요`,
       achievedDate: firstReaching(data.prEvents, t),
@@ -1069,7 +1086,7 @@ function buildBadges(data) {
         tier: i,
         glyph: "runnerRoad",
         centerLabel: `${t}`,
-        subLabel: t === 21 ? "km 하프" : "km",
+        subLabel: "km",
         name: t === 21 ? "하프마라톤 완주" : `단일 러닝 ${t}km`,
         description: t === 21 ? "한 번에 21km(하프마라톤)를 달렸어요" : `한 번에 ${t}km를 달렸어요`,
         achievedDate: hit ? hit.date : null,
@@ -1120,8 +1137,8 @@ function buildBadges(data) {
         series: "천국의계단 단계",
         tier: 2 + i,
         glyph: "stairs",
-        centerLabel: `${t}`,
-        subLabel: "LV",
+        centerLabel: `단계${t}`,
+        subLabel: null,
         name: `천국의계단 단계 ${t}`,
         description: `천국의계단 단계 ${t}을 달성했어요`,
         achievedDate: hit ? hit.date : null,

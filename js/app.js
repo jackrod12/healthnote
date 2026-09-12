@@ -1452,7 +1452,7 @@ function formatBadgeDate(dateStr) {
 const SERIES_GROUPED_CATEGORIES = new Set(["pr", "연속", "cardio", "inbody", "lifestyle", "volume"]);
 
 function renderBadgeCard(b) {
-  const icon = renderBadgeIconSvg(b, { width: 56, height: 56 });
+  const icon = renderBadgeIconSvg(b, { width: 48, height: 48 });
   return `
     <button type="button" class="badge-card${b.achieved ? " achieved" : ""}" data-badge-id="${b.id}" aria-label="${b.name}">
       ${icon}
@@ -1529,9 +1529,94 @@ function renderBadgeSummary() {
   const achieved = allBadgesCache.filter((b) => b.achieved).length;
   const pct = total ? Math.round((achieved / total) * 100) : 0;
   $("#badge-summary").innerHTML = `
-    <div class="badge-summary-count">${achieved} / ${total}개 달성</div>
+    <div class="badge-summary-count">🏅 ${achieved} / ${total}개 달성</div>
     <div class="badge-summary-bar"><div class="badge-summary-bar-fill" style="width:${pct}%"></div></div>
   `;
+
+  $("#badge-category-bars").innerHTML = BADGE_CATEGORIES.map((cat) => {
+    const inCat = allBadgesCache.filter((b) => b.category === cat.key);
+    if (!inCat.length) return "";
+    const catAchieved = inCat.filter((b) => b.achieved).length;
+    const catPct = Math.round((catAchieved / inCat.length) * 100);
+    return `
+      <div class="badge-cat-bar-row">
+        <span class="badge-cat-bar-label">${cat.label}</span>
+        <div class="badge-cat-bar-track"><div class="badge-cat-bar-fill" style="width:${catPct}%"></div></div>
+        <span class="badge-cat-bar-count">${catAchieved}/${inCat.length}</span>
+      </div>`;
+  }).join("");
+}
+
+function computeProgressPercent(badge) {
+  const p = badge.progress;
+  if (!p) return 0;
+  if (p.invert) {
+    if (p.current == null || p.current <= 0) return 0;
+    return Math.max(0, Math.min(100, (p.target / p.current) * 100));
+  }
+  if (!p.target) return 0;
+  return Math.max(0, Math.min(100, (p.current / p.target) * 100));
+}
+
+function renderRecentBadges() {
+  const card = $("#badge-recent-card");
+  const recent = allBadgesCache
+    .filter((b) => b.achieved)
+    .sort((a, b) => (a.achievedDate < b.achievedDate ? 1 : a.achievedDate > b.achievedDate ? -1 : 0))
+    .slice(0, 5);
+
+  if (!recent.length) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+
+  $("#badge-recent-list").innerHTML = recent
+    .map(
+      (b) => `
+        <div class="badge-recent-item">
+          ${renderBadgeCard(b)}
+          <span class="badge-recent-date">${formatBadgeDate(b.achievedDate)}</span>
+        </div>`
+    )
+    .join("");
+
+  $$(".badge-card", $("#badge-recent-list")).forEach((card) => {
+    card.addEventListener("click", () => openBadgeModal(card.dataset.badgeId));
+  });
+}
+
+function renderUpcomingBadges() {
+  const card = $("#badge-upcoming-card");
+  const upcoming = allBadgesCache
+    .filter((b) => !b.achieved && computeProgressPercent(b) >= 70)
+    .map((b) => ({ b, pct: computeProgressPercent(b) }))
+    .sort((x, y) => y.pct - x.pct)
+    .slice(0, 5);
+
+  if (!upcoming.length) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+
+  $("#badge-upcoming-list").innerHTML = upcoming
+    .map(
+      ({ b, pct }) => `
+        <div class="badge-upcoming-item">
+          ${renderBadgeCard(b)}
+          <div class="badge-upcoming-info">
+            <div class="badge-upcoming-name">${b.name}</div>
+            <div class="badge-upcoming-bar-track"><div class="badge-upcoming-bar-fill" style="width:${pct}%"></div></div>
+            <div class="badge-upcoming-fraction">${formatProgressText(b)}</div>
+          </div>
+        </div>`
+    )
+    .join("");
+
+  $$(".badge-card", $("#badge-upcoming-list")).forEach((card) => {
+    card.addEventListener("click", () => openBadgeModal(card.dataset.badgeId));
+  });
 }
 
 function openBadgeModal(badgeId) {
@@ -1570,6 +1655,8 @@ $("#modal-badge-detail").addEventListener("click", (e) => {
 async function renderBadgesTab() {
   allBadgesCache = await evaluateAllBadges();
   renderBadgeSummary();
+  renderRecentBadges();
+  renderUpcomingBadges();
   renderBadgeSections();
 }
 

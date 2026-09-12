@@ -905,6 +905,11 @@ input[type="range"] {
 }
 
 /* Badges — 마라톤 완주 메달 스타일 */
+#badge-sections {
+  padding: 0 12px;
+  margin: 0 -16px;
+}
+
 .badge-summary-count {
   font-size: 20px;
   font-weight: 700;
@@ -923,6 +928,114 @@ input[type="range"] {
   background: linear-gradient(90deg, var(--mint), #ffd700);
   border-radius: 999px;
   transition: width 0.3s ease;
+}
+
+.badge-category-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.badge-cat-bar-row {
+  display: grid;
+  grid-template-columns: 84px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge-cat-bar-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge-cat-bar-track {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--card-alt);
+  overflow: hidden;
+}
+
+.badge-cat-bar-fill {
+  height: 100%;
+  background: var(--mint);
+  border-radius: 999px;
+}
+
+.badge-cat-bar-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: right;
+}
+
+/* 최근 달성 */
+.badge-recent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.badge-recent-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-recent-date {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* 곧 달성 */
+.badge-upcoming-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.badge-upcoming-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.badge-upcoming-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.badge-upcoming-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge-upcoming-bar-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--card-alt);
+  overflow: hidden;
+}
+
+.badge-upcoming-bar-fill {
+  height: 100%;
+  background: var(--mint);
+  border-radius: 999px;
+}
+
+.badge-upcoming-fraction {
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .badge-section {
@@ -948,7 +1061,7 @@ input[type="range"] {
 }
 
 .badge-series-row {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .badge-series-row:last-child {
@@ -964,15 +1077,8 @@ input[type="range"] {
 
 .badge-series-scroll {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: 2px;
-}
-
-.badge-series-scroll::-webkit-scrollbar {
-  display: none;
 }
 
 /* 7~11번 카테고리: 필터/구분 없이 grid로 나열 (wrap) */
@@ -992,8 +1098,8 @@ input[type="range"] {
 /* 박스/카드 외곽선 없이 메달 SVG만 표시 */
 .badge-card {
   flex: none;
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   padding: 0;
   border: none;
   background: transparent;
