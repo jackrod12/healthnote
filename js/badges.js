@@ -1,21 +1,21 @@
 import * as db from "./db.js";
 
 /* =====================================================================
- * 뱃지 시스템 — 마라톤 완주 메달 스타일 (2차 개편)
+ * 뱃지 시스템 — 포켓몬 뱃지 스타일 (단순/명확)
  * 모든 뱃지는 DB에 저장되지 않고, 기존 기록(workoutLogs/inbodyRecords/
  * drinkLog2/routines/workoutMemo/settings)으로부터 매번 다시 계산됩니다.
  * "달성일"은 조건을 최초로 만족시킨 시점의 날짜를 데이터에서 역산해서
  * 구합니다.
  *
- * 디자인: 상단 고리 + 원형 메달(카테고리별 컬러 그라디언트 얼굴 + 티어별
- * 메탈릭 테두리) + 중앙 아이콘 + 은색 리본 배너(시리즈명) + 리본 아래
- * 수치 텍스트. 달성/미달성 톤(그레이스케일+40% 불투명도)은 app.js의
- * CSS가 담당하고, 여기서는 항상 풀컬러 SVG를 만들어 낸다.
+ * 디자인: viewBox 60×60, 원형 배경(난이도 단계별 통일 색상) + 흰색 단색
+ * 아이콘. 뱃지 SVG 자체에는 텍스트를 넣지 않고, 이름/조건/달성일/진행률은
+ * 모달에서만 보여준다. 달성/미달성 톤(그레이스케일+35% 불투명도)은
+ * app.js의 CSS가 담당하고, 여기서는 항상 풀컬러 SVG를 만들어 낸다.
  * ===================================================================== */
 
 export const BADGE_CATEGORIES = [
   { key: "pr", label: "PR" },
-  { key: "streak", label: "Streak" },
+  { key: "연속", label: "연속 운동" },
   { key: "cardio", label: "유산소" },
   { key: "inbody", label: "인바디" },
   { key: "lifestyle", label: "생활습관" },
@@ -27,87 +27,66 @@ export const BADGE_CATEGORIES = [
   { key: "hidden", label: "히든" },
 ];
 
-/* ---------------- 카테고리별 메달 얼굴 컬러 (그라디언트 2색) ---------------- */
-const CATEGORY_COLORS = {
-  pr: ["#8B0000", "#DC143C"],
-  streak: ["#1a1a1a", "#333333"],
-  cardio: ["#003087", "#0057B8"],
-  inbody: ["#1B5E20", "#2E7D32"],
-  lifestyle: ["#4A148C", "#7B1FA2"],
-  volume: ["#E65100", "#F57C00"],
-  style: ["#006064", "#00838F"],
-  special: ["#1A237E", "#283593"],
-  milestone: ["#37474F", "#546E7A"],
-  challenge: ["#1A237E", "#283593"],
-  hidden: ["#212121", "#424242"],
-};
-
-/* 외곽 테두리: 기본은 금색, 히든 카테고리만 은색 */
-const GOLD_BORDER = ["#B8860B", "#FFD700", "#FFA500"];
-const SILVER_BORDER = ["#9E9E9E", "#E8E8E8", "#B0B0B0"];
-const LAUREL_COLOR = "#B8860B";
-
 /* 뱃지 tier 값의 최대 인덱스 (0~5, 6단계) — 시리즈 내 순번 클램핑용 */
 const MAX_TIER_INDEX = 5;
 
-/* ---------------- 색상 유틸 ---------------- */
-function hexToRgb(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-}
-function rgbToHex(r, g, b) {
-  return (
-    "#" +
-    [r, g, b]
-      .map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0"))
-      .join("")
-  );
-}
-function lighten(hex, amt) {
-  const { r, g, b } = hexToRgb(hex);
-  return rgbToHex(r + (255 - r) * amt, g + (255 - g) * amt, b + (255 - b) * amt);
-}
-function darken(hex, amt) {
-  const { r, g, b } = hexToRgb(hex);
-  return rgbToHex(r * (1 - amt), g * (1 - amt), b * (1 - amt));
-}
+/* ---------------- 난이도별 색상 통일 (모든 시리즈 뱃지에 동일 적용) ---------------- */
+const TIER_PALETTE = [
+  { bg: "#CD7F32", border: "#A0522D" }, // 1단계 구리
+  { bg: "#C0C0C0", border: "#808080" }, // 2단계 은색
+  { bg: "#FFD700", border: "#B8860B" }, // 3단계 금색
+  { bg: "#50C878", border: "#2E8B57" }, // 4단계 에메랄드
+  { bg: "#B9F2FF", border: "#4FC3F7" }, // 5단계 다이아몬드
+  { bg: "#9C27B0", border: "#6A1B9A" }, // 6단계 이상 자주색
+];
 
-/* ---------------- 뱃지 내부 글리프: 굵고 단순한 형태 (0..40 좌표계) ---------------- */
+/* ---------------- 뱃지 내부 글리프: 굵고 단순한 형태 (0..40 좌표계, 항상 흰색) ---------------- */
 const GLYPHS = {
   barbellBench: `
     <rect x="6" y="17" width="28" height="6" rx="2" fill="#fff"/>
     <circle cx="7" cy="20" r="7" fill="#fff"/>
     <circle cx="4" cy="20" r="4.5" fill="#fff"/>
     <circle cx="33" cy="20" r="7" fill="#fff"/>
-    <circle cx="36" cy="20" r="4.5" fill="#fff"/>`,
-  barbellSquat: `
-    <rect x="6" y="8" width="28" height="6" rx="2" fill="#fff"/>
-    <circle cx="7" cy="11" r="6" fill="#fff"/>
-    <circle cx="33" cy="11" r="6" fill="#fff"/>
-    <path d="M14 14 L11 30 M26 14 L29 30 M13 30h6M21 30h6" stroke="#fff" stroke-width="4"
-      fill="none" stroke-linecap="round"/>`,
-  barbellDeadlift: `
-    <rect x="6" y="26" width="28" height="6" rx="2" fill="#fff"/>
-    <circle cx="7" cy="29" r="6" fill="#fff"/>
-    <circle cx="33" cy="29" r="6" fill="#fff"/>
-    <path d="M20 23 V6 M13 12 L20 5 L27 12" stroke="#fff" stroke-width="4"
-      fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
+    <circle cx="36" cy="20" r="4.5" fill="#fff"/>
+    <rect x="10" y="30" width="20" height="4" rx="1.5" fill="#fff" opacity="0.8"/>`,
+  squatPerson: `
+    <circle cx="20" cy="6" r="4.5" fill="#fff"/>
+    <rect x="6" y="10" width="28" height="5" rx="2.5" fill="#fff"/>
+    <circle cx="6" cy="12.5" r="5.5" fill="#fff"/>
+    <circle cx="34" cy="12.5" r="5.5" fill="#fff"/>
+    <path d="M14 15h12v6c0 3-1.5 5-1.5 8s1.5 6 1.5 9h-4l-2-7-2 7h-4c0-3 1.5-6 1.5-9s-1.5-5-1.5-8z" fill="#fff"/>`,
+  deadliftPerson: `
+    <circle cx="13" cy="8" r="4.5" fill="#fff"/>
+    <path d="M13 13c4 2 7 6 9 13l4 12h-4.5l-3-9-4.5-4-3.5 13h-4.5l3-15c0.5-4 1.5-8 3.5-10z" fill="#fff"/>
+    <rect x="4" y="30" width="32" height="5" rx="2.5" fill="#fff"/>
+    <circle cx="6" cy="32.5" r="5.5" fill="#fff"/>
+    <circle cx="34" cy="32.5" r="5.5" fill="#fff"/>`,
   dumbbell: `
     <rect x="14" y="17" width="12" height="6" rx="2" fill="#fff"/>
     <circle cx="8" cy="20" r="8" fill="#fff"/>
     <circle cx="32" cy="20" r="8" fill="#fff"/>`,
-  flame: `
-    <path d="M20 3c9 9 13 15 13 22a13 13 0 01-26 0c0-4 1.5-7.5 4-11 .5 3 2 5 4 5 1-4 0-8 5-16z" fill="#FF7A1A"/>
-    <path d="M20 12c6 7 8 11 8 15.5a8 8 0 01-16 0c0-2.5 1-4.5 2.5-6.5.3 1.8 1.2 3 2.5 3 .6-2.5 0-5 3-12z" fill="#FF3B1F"/>
-    <path d="M20 20c2.5 3 3.5 5 3.5 7a3.5 3.5 0 01-7 0c0-1 .3-1.8.8-2.6.2.7.6 1.1 1.1 1.1.3-1.1 0-2.2 1.6-5.5z" fill="#FFC93B"/>`,
+  flame: `<path d="M20 3c9 9 13 15 13 22a13 13 0 01-26 0c0-4 1.5-7.5 4-11 .5 3 2 5 4 5 1-4 0-8 5-16z" fill="#fff"/>`,
   calendar: `
     <rect x="5" y="9" width="30" height="24" rx="3" fill="#fff"/>
     <rect x="5" y="9" width="30" height="7" rx="3" fill="#00000030"/>
     <circle cx="13" cy="6" r="3" fill="#fff"/>
     <circle cx="27" cy="6" r="3" fill="#fff"/>`,
+  calendarStack: `
+    <rect x="11" y="4" width="20" height="16" rx="2" fill="#fff" opacity="0.5"/>
+    <rect x="7" y="11" width="22" height="17" rx="2" fill="#fff" opacity="0.75"/>
+    <rect x="3" y="18" width="24" height="18" rx="2" fill="#fff"/>
+    <rect x="3" y="18" width="24" height="6" rx="2" fill="#00000030"/>`,
   shoe: `
     <ellipse cx="19" cy="17" rx="15" ry="7.5" fill="#fff" transform="rotate(-14 19 17)"/>
     <rect x="4" y="23" width="32" height="6" rx="3" fill="#fff"/>`,
+  runnerRoad: `
+    <path d="M4 34h32" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="5 4"/>
+    <circle cx="21" cy="6" r="4.5" fill="#fff"/>
+    <path d="M17 11l2 6-6 4 2 4 6-4 4 3-2 8h4l2-9-4-5 1-4 5 2 2-4-7-3z" fill="#fff"/>`,
+  paceIcon: `
+    <circle cx="18" cy="21" r="14" fill="none" stroke="#fff" stroke-width="3.2"/>
+    <path d="M18 11v10l7 4" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M31 6l-6 10h5l-6 10 11-13h-6z" fill="#fff"/>`,
   heartbeat: `<path d="M3 21h7l3-9 5 16 4-11 2 4h13" stroke="#fff" stroke-width="4"
     stroke-linecap="round" stroke-linejoin="round" fill="none"/>`,
   stairs: `<path d="M4 34V26H12V20H20V14H28V8H36" stroke="#fff" stroke-width="5" fill="none"
@@ -118,15 +97,16 @@ const GLYPHS = {
     <circle cx="20" cy="27" r="4" fill="#fff"/>
     <path d="M9 25l2.5-1.5M31 25l-2.5-1.5M20 11v3.5" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>`,
   muscle: `<path d="M10 30c-3-2-4-6-2-10 1-3 4-5 4-9 0-3 2-5 5-5 4 0 6 3 6 6 3-1 6 0 8 3 3 4 2 10-2 13-3 2-6 3-9 3H14c-1 0-3 0-4-1z" fill="#fff"/>`,
-  bodyfatDrop: `
-    <path d="M20 4c6 9 11 15 11 21a11 11 0 01-22 0c0-6 5-12 11-21z" fill="#fff" opacity="0.92"/>
-    <path d="M14 26a6 6 0 006 6" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6"/>`,
+  fatBurn: `
+    <path d="M14 4c5 6 8 10 8 14a8 8 0 01-16 0c0-4 3-8 8-14z" fill="#fff"/>
+    <path d="M28 15c4 5 6 8 6 11a6 6 0 01-12 0c0-3 2-6 6-11z" fill="#fff" opacity="0.75"/>`,
   bmiCheck: `
     <circle cx="20" cy="20" r="15" stroke="#fff" stroke-width="3" fill="none"/>
     <path d="M12 20l5 5 11-11" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
   bottle: `
     <rect x="15" y="4" width="10" height="6" rx="2" fill="#fff"/>
-    <path d="M13 12h14a2 2 0 012 2v18a4 4 0 01-4 4H15a4 4 0 01-4-4V14a2 2 0 012-2z" fill="#fff"/>`,
+    <path d="M13 12h14a2 2 0 012 2v18a4 4 0 01-4 4H15a4 4 0 01-4-4V14a2 2 0 012-2z" fill="#fff"/>
+    <rect x="13" y="17" width="14" height="3" fill="#00000030"/>`,
   glassX: `
     <path d="M10 6h20l-3 22a3 3 0 01-3 3H16a3 3 0 01-3-3z" stroke="#fff" stroke-width="3" fill="none" stroke-linejoin="round"/>
     <path d="M14 12l12 12M26 12L14 24" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`,
@@ -138,32 +118,45 @@ const GLYPHS = {
     <rect x="17" y="24" width="6" height="7" fill="#fff"/>
     <rect x="12" y="31" width="16" height="4" rx="1.5" fill="#fff"/>`,
   boltGlyph: `<path d="M23 2 7 23h10l-4 15 20-22H21z" fill="#fff"/>`,
-  sunrise: `
-    <path d="M4 24h32" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
-    <path d="M10 24a10 10 0 0120 0" fill="#fff"/>
-    <path d="M20 6v4M10 10l3 3M30 10l-3 3" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>`,
   moon: `<path d="M27 6a15 15 0 100 28 12 12 0 010-28z" fill="#fff"/>`,
-  flag: `
-    <rect x="8" y="4" width="4" height="32" rx="2" fill="#fff"/>
-    <path d="M12 6h18l-5 7 5 7H12z" fill="#fff"/>`,
+  shield: `<path d="M20 4 32 9v10c0 9-5 15-12 17-7-2-12-8-12-17V9z" fill="#fff"/>`,
+  star: `<path d="M20 3 L24.7 14.5 L37 15.5 L27.5 23.5 L30.5 35.5 L20 29 L9.5 35.5 L12.5 23.5 L3 15.5 L15.3 14.5 Z" fill="#fff"/>`,
+  starOutline: `<path d="M20 3 L24.7 14.5 L37 15.5 L27.5 23.5 L30.5 35.5 L20 29 L9.5 35.5 L12.5 23.5 L3 15.5 L15.3 14.5 Z" fill="none" stroke="#fff" stroke-width="2.6" stroke-linejoin="round"/>`,
+  crown: `<path d="M6 30 L4 14 L13 21 L20 8 L27 21 L36 14 L34 30 Z" fill="#fff"/>`,
+  leaf: `
+    <path d="M8 32C6 18 16 6 32 6c1 16-10 26-24 26z" fill="#fff"/>
+    <path d="M10 30C16 22 22 16 30 10" stroke="#00000030" stroke-width="2" fill="none"/>`,
+  tower: `
+    <rect x="14" y="6" width="12" height="8" rx="1.5" fill="#fff"/>
+    <rect x="9" y="16" width="22" height="8" rx="1.5" fill="#fff"/>
+    <rect x="4" y="26" width="32" height="8" rx="1.5" fill="#fff"/>`,
+  key: `
+    <circle cx="13" cy="13" r="9" fill="none" stroke="#fff" stroke-width="4"/>
+    <path d="M19 19 L34 34 M27 27 l4 -4 M31 31 l4 -4" stroke="#fff" stroke-width="4" stroke-linecap="round"/>`,
+  flameCalendar: `
+    <rect x="5" y="12" width="24" height="20" rx="3" fill="#fff" opacity="0.85"/>
+    <path d="M28 6c4 5 6 8 6 11a6 6 0 01-12 0c0-2 1-4 2-5.5.2 1 .6 1.7 1.4 1.7.4-1.6 0-3.2 2.6-7.2z" fill="#fff"/>`,
+  check: `<path d="M6 21 L16 31 L34 9" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
+  smiley: `
+    <circle cx="20" cy="20" r="16" fill="none" stroke="#fff" stroke-width="3"/>
+    <circle cx="14" cy="16" r="2.4" fill="#fff"/>
+    <circle cx="26" cy="16" r="2.4" fill="#fff"/>
+    <path d="M12 24c2 4 6 6 8 6s6-2 8-6" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>`,
+  fiveStars: `
+    <path d="M20 2 L22.2 8.4 L29 8.6 L23.6 12.8 L25.5 19.4 L20 15.4 L14.5 19.4 L16.4 12.8 L11 8.6 L17.8 8.4 Z" fill="#fff"/>
+    <path d="M6 20 L7 23 L10 23 L7.5 25 L8.5 28 L6 26 L3.5 28 L4.5 25 L2 23 L5 23 Z" fill="#fff"/>
+    <path d="M34 20 L35 23 L38 23 L35.5 25 L36.5 28 L34 26 L31.5 28 L32.5 25 L30 23 L33 23 Z" fill="#fff"/>
+    <path d="M13 28 L14 31 L17 31 L14.5 33 L15.5 36 L13 34 L10.5 36 L11.5 33 L9 31 L12 31 Z" fill="#fff"/>
+    <path d="M27 28 L28 31 L31 31 L28.5 33 L29.5 36 L27 34 L24.5 36 L25.5 33 L23 31 L26 31 Z" fill="#fff"/>`,
   sunNoon: `
     <circle cx="20" cy="20" r="9" fill="#fff"/>
     <path d="M20 3v5M20 32v5M3 20h5M32 20h5M8 8l3.5 3.5M28.5 28.5L32 32M8 32l3.5-3.5M28.5 11.5L32 8" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/>`,
   raindrop: `<path d="M20 4c6 9 11 16 11 22a11 11 0 01-22 0c0-6 5-13 11-22z" fill="#fff"/>`,
-  checklist: `
-    <rect x="7" y="6" width="26" height="28" rx="3" stroke="#fff" stroke-width="3" fill="none"/>
-    <path d="M12 14l3 3 5-6M12 24l3 3 5-6" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M23 15h7M23 25h7" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`,
   pencil: `<path d="M8 32l2-8 16-16 6 6-16 16-8 2z" fill="#fff"/>`,
   footprint: `
     <ellipse cx="16" cy="24" rx="6" ry="9" fill="#fff"/>
     <ellipse cx="26" cy="12" rx="5" ry="7" fill="#fff" opacity="0.85"/>`,
   sparkle: `<path d="M20 4 L23 17 L36 20 L23 23 L20 36 L17 23 L4 20 L17 17 Z" fill="#fff"/>`,
-  seasons: `
-    <path d="M20 20 C20 10 14 6 8 8 C10 14 14 20 20 20Z" fill="#fff" opacity="0.9"/>
-    <path d="M20 20 C30 20 34 14 32 8 C26 10 20 14 20 20Z" fill="#fff" opacity="0.75"/>
-    <path d="M20 20 C20 30 26 34 32 32 C30 26 26 20 20 20Z" fill="#fff" opacity="0.6"/>
-    <path d="M20 20 C10 20 6 26 8 32 C14 30 20 26 20 20Z" fill="#fff" opacity="0.45"/>`,
   starGlyph: `<path d="M20 3 L24.5 15.5 L38 16 L27.5 24 L31 37 L20 29.5 L9 37 L12.5 24 L2 16 L15.5 15.5 Z" fill="#fff"/>`,
   target: `
     <circle cx="20" cy="20" r="15" fill="#fff" opacity="0.25"/>
@@ -182,134 +175,27 @@ const GLYPHS = {
     <path d="M10 16l-4-2M10 28l-4 2M30 16l4-2M30 28l4 2" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`,
 };
 
-function escapeXml(str) {
-  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 function renderGlyph(glyphKey, x, y, w, h) {
   const inner = GLYPHS[glyphKey];
   if (!inner) return "";
-  return `<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 40 40">${inner}</svg>`;
+  return `<svg x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" viewBox="0 0 40 40">${inner}</svg>`;
 }
 
-/* ---------------- 월계수 장식 (좌우 대칭, 원 중심 기준 배치) ---------------- */
-const LAUREL_LEAF_D = "M0 0 C-3.2 -2.2 -3.4 -6.4 0 -9.5 C3.4 -6.4 3.2 -2.2 0 0 Z";
-const LAUREL_LEFT_ANGLES = [108, 136, 164, 192, 220, 248];
-
-function laurelLeaf(cx, cy, r, angleDeg) {
-  const rad = (angleDeg * Math.PI) / 180;
-  const x = cx + r * Math.cos(rad);
-  const y = cy + r * Math.sin(rad);
-  const rot = angleDeg + 90;
-  return `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${rot.toFixed(1)})"><path d="${LAUREL_LEAF_D}" fill="${LAUREL_COLOR}"/></g>`;
-}
-
-function laurelMarkup(cx, cy, r) {
-  return LAUREL_LEFT_ANGLES.map((a) => laurelLeaf(cx, cy, r, a) + laurelLeaf(cx, cy, r, 180 - a)).join("");
-}
-
-/* ---------------- 보석 장식 (4단계: 1개, 5단계: 3개) ---------------- */
-function gemMarkup(x, y, size) {
-  return `<path d="M${x} ${(y - size).toFixed(1)} L${(x + size * 0.78).toFixed(1)} ${y} L${x} ${(y + size).toFixed(1)} L${(x - size * 0.78).toFixed(1)} ${y} Z" fill="#FFD700" stroke="#B8860B" stroke-width="0.8"/>`;
-}
-
-/* ---------------- 세련된 메달 SVG 생성 (viewBox 0 0 80 95) ---------------- */
+/* ---------------- 포켓몬 뱃지 스타일 SVG 생성 (viewBox 0 0 60 60) ---------------- */
 export function renderBadgeIconSvg(badge, opts = {}) {
-  const w = opts.width || 72;
-  const h = opts.height || 85;
-  const uid = badge.id.replace(/[^a-zA-Z0-9]/g, "");
-  const baseColors = CATEGORY_COLORS[badge.category] || CATEGORY_COLORS.pr;
-  const border = badge.category === "hidden" ? SILVER_BORDER : GOLD_BORDER;
+  const w = opts.width || 56;
+  const h = opts.height || 56;
+  const tierIndex = Math.min(Math.max(badge.tier ?? 0, 0), TIER_PALETTE.length - 1);
+  const palette = TIER_PALETTE[tierIndex];
 
-  // 시리즈 단계별 차별화: 배경은 단계가 오를수록 밝아지고, 3단계+ 하이라이트 링,
-  // 4단계 보석 1개, 5단계(이상) 보석 3개 + 두꺼운 테두리.
-  const tierLevel = Math.min(badge.tier ?? 0, 4);
-  const bgAmt = tierLevel * 0.1;
-  const faceTop = lighten(baseColors[1], bgAmt);
-  const faceBottom = lighten(baseColors[0], bgAmt * 0.6);
-  const borderWidth = tierLevel >= 4 ? 7 : 5;
-  const hasHighlightRing = tierLevel >= 2;
-  const gemCount = tierLevel === 3 ? 1 : tierLevel >= 4 ? 3 : 0;
+  const scale = badge.iconScale || 1;
+  const iconSize = 34 * scale;
+  const iconOffset = (60 - iconSize) / 2;
+  const iconMarkup = badge.glyph ? renderGlyph(badge.glyph, iconOffset, iconOffset, iconSize, iconSize) : "";
 
-  const cx = 40;
-  const cy = 45;
-  const r = 32;
-
-  const hasValue = !!badge.centerLabel;
-  const ribbonText = badge.series || badge.name;
-  const ribbonLen = ribbonText.length;
-  const ribbonFontSize = ribbonLen > 9 ? 5.2 : ribbonLen > 6 ? 6.2 : 7.2;
-
-  const iconMarkup = badge.glyph
-    ? hasValue
-      ? renderGlyph(badge.glyph, 24, 14, 32, 24)
-      : renderGlyph(badge.glyph, 16, 12, 48, 40)
-    : "";
-
-  const valueLen = hasValue ? `${badge.centerLabel}${badge.subLabel || ""}`.length : 0;
-  const valueFontSize = valueLen > 8 ? 8 : valueLen > 5 ? 9.5 : 12;
-  const valueMarkup = hasValue
-    ? `<text x="40" y="60" text-anchor="middle" dominant-baseline="middle" font-size="${valueFontSize}" font-weight="800" fill="#fff" font-family="system-ui, -apple-system, sans-serif" paint-order="stroke" stroke="rgba(0,0,0,0.35)" stroke-width="2" stroke-linejoin="round">${escapeXml(
-        `${badge.centerLabel}${badge.subLabel || ""}`.toUpperCase()
-      )}</text>`
-    : "";
-
-  const gemsMarkup =
-    gemCount === 1
-      ? gemMarkup(40, 16, 3.4)
-      : gemCount === 3
-        ? gemMarkup(40, 14, 3.4) + gemMarkup(25, 19, 2.6) + gemMarkup(55, 19, 2.6)
-        : "";
-
-  return `<svg viewBox="0 0 80 95" width="${w}" height="${h}" class="badge-svg">
-    <defs>
-      <linearGradient id="face-${uid}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${faceTop}"/>
-        <stop offset="100%" stop-color="${faceBottom}"/>
-      </linearGradient>
-      <linearGradient id="border-${uid}" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="${border[0]}"/>
-        <stop offset="50%" stop-color="${border[1]}"/>
-        <stop offset="100%" stop-color="${border[2]}"/>
-      </linearGradient>
-      <linearGradient id="ribbon-${uid}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#FFF8E1"/>
-        <stop offset="55%" stop-color="#E8C874"/>
-        <stop offset="100%" stop-color="#C9A227"/>
-      </linearGradient>
-      <radialGradient id="hl-${uid}" cx="35%" cy="20%" r="65%">
-        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
-        <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-      </radialGradient>
-    </defs>
-
-    <!-- 상단 클립 + 두 개 고리 -->
-    <rect x="31" y="0" width="18" height="7" rx="2" fill="url(#border-${uid})"/>
-    <circle cx="35" cy="12" r="4.5" fill="none" stroke="url(#border-${uid})" stroke-width="2.6"/>
-    <circle cx="45" cy="12" r="4.5" fill="none" stroke="url(#border-${uid})" stroke-width="2.6"/>
-
-    <!-- 메달 본체 -->
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#face-${uid})"/>
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#hl-${uid})"/>
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#border-${uid})" stroke-width="${borderWidth}"/>
-    ${hasHighlightRing ? `<circle cx="${cx}" cy="${cy}" r="${r - borderWidth / 2 - 2}" fill="none" stroke="#FFD700" stroke-opacity="0.65" stroke-width="1.4"/>` : ""}
-
-    <!-- 월계수 -->
-    ${laurelMarkup(cx, cy, r - 5)}
-
-    <!-- 아이콘 + 수치 -->
+  return `<svg viewBox="0 0 60 60" width="${w}" height="${h}" class="badge-svg">
+    <circle cx="30" cy="30" r="27" fill="${palette.bg}" stroke="${palette.border}" stroke-width="3"/>
     ${iconMarkup}
-    ${valueMarkup}
-
-    <!-- 보석 장식 -->
-    ${gemsMarkup}
-
-    <!-- 곡선 배너 리본 -->
-    <path d="M8 66 Q40 78 72 66 L72 83 Q40 95 8 83 Z" fill="url(#ribbon-${uid})"/>
-    <path d="M8 66 Q40 78 72 66" fill="none" stroke="#B8860B" stroke-width="1" stroke-opacity="0.5"/>
-    <text x="40" y="78" text-anchor="middle" dominant-baseline="middle" font-size="${ribbonFontSize}" font-weight="800" fill="#3E2A00" font-family="system-ui, -apple-system, sans-serif" letter-spacing="0.2">${escapeXml(
-      ribbonText.toUpperCase()
-    )}</text>
   </svg>`;
 }
 
@@ -1028,7 +914,7 @@ function buildBadges(data) {
       category: "pr",
       series: "스쿼트",
       tier: i,
-      glyph: "barbellSquat",
+      glyph: "squatPerson",
       centerLabel: `${t}`,
       subLabel: "kg",
       name: `스쿼트 ${t}kg`,
@@ -1043,7 +929,7 @@ function buildBadges(data) {
       category: "pr",
       series: "데드리프트",
       tier: i,
-      glyph: "barbellDeadlift",
+      glyph: "deadliftPerson",
       centerLabel: `${t}`,
       subLabel: "kg",
       name: `데드리프트 ${t}kg`,
@@ -1058,7 +944,7 @@ function buildBadges(data) {
       category: "pr",
       series: "PR 갱신",
       tier: i,
-      glyph: "dumbbell",
+      glyph: "trophy",
       centerLabel: `${t}`,
       subLabel: "PR",
       name: `PR ${t}회 갱신`,
@@ -1071,11 +957,12 @@ function buildBadges(data) {
   /* ============ 🔥 연속 운동 streak (20개) ============ */
   [3, 7, 14, 30, 60, 100].forEach((t, i) => {
     list.push({
-      id: `streak-days-${t}`,
-      category: "streak",
+      id: `연속-days-${t}`,
+      category: "연속",
       series: "연속 운동",
       tier: Math.min(i, MAX_TIER_INDEX),
       glyph: "flame",
+      iconScale: 0.85 + Math.min(i, MAX_TIER_INDEX) * 0.06,
       centerLabel: `${t}`,
       subLabel: "일",
       name: `연속 운동 ${t}일`,
@@ -1086,8 +973,8 @@ function buildBadges(data) {
   });
   [2, 3, 4, 5].forEach((t, i) => {
     list.push({
-      id: `streak-weekly-${t}`,
-      category: "streak",
+      id: `연속-weekly-${t}`,
+      category: "연속",
       series: "주간 달성",
       tier: i,
       glyph: "calendar",
@@ -1101,8 +988,8 @@ function buildBadges(data) {
   });
   [4, 12].forEach((t, i) => {
     list.push({
-      id: `streak-weekly3-${t}`,
-      category: "streak",
+      id: `연속-weekly3-${t}`,
+      category: "연속",
       series: "주 3회 연속",
       tier: i === 0 ? 1 : 3,
       glyph: "flame",
@@ -1116,8 +1003,8 @@ function buildBadges(data) {
   });
   [10, 15, 20, 25, 30].forEach((t, i) => {
     list.push({
-      id: `streak-monthly-${t}`,
-      category: "streak",
+      id: `연속-monthly-${t}`,
+      category: "연속",
       series: "월간 달성",
       tier: i,
       glyph: "calendar",
@@ -1131,8 +1018,8 @@ function buildBadges(data) {
   });
   [100, 365, 500].forEach((t, i) => {
     list.push({
-      id: `streak-total-${t}`,
-      category: "streak",
+      id: `연속-total-${t}`,
+      category: "연속",
       series: "누적 운동",
       tier: 2 + i,
       glyph: "calendar",
@@ -1180,7 +1067,7 @@ function buildBadges(data) {
         category: "cardio",
         series: "단일 러닝",
         tier: i,
-        glyph: "shoe",
+        glyph: "runnerRoad",
         centerLabel: `${t}`,
         subLabel: t === 21 ? "km 하프" : "km",
         name: t === 21 ? "하프마라톤 완주" : `단일 러닝 ${t}km`,
@@ -1204,7 +1091,7 @@ function buildBadges(data) {
         category: "cardio",
         series: "페이스",
         tier: i,
-        glyph: "heartbeat",
+        glyph: "paceIcon",
         centerLabel: formatPaceLabel(t),
         name: `페이스 ${label} 이내`,
         description: `평균 페이스 ${label} 이내로 러닝했어요`,
@@ -1290,7 +1177,7 @@ function buildBadges(data) {
       category: "inbody",
       series: "체지방률 감소",
       tier: i,
-      glyph: "bodyfatDrop",
+      glyph: "fatBurn",
       centerLabel: `-${t}`,
       subLabel: "%p",
       name: `체지방률 -${t}%p`,
@@ -1334,7 +1221,7 @@ function buildBadges(data) {
       category: "inbody",
       series: "인바디 기록",
       tier: i,
-      glyph: "scale",
+      glyph: "calendar",
       centerLabel: `${t}`,
       subLabel: "회",
       name: `인바디 기록 ${t}회`,
@@ -1413,7 +1300,7 @@ function buildBadges(data) {
       category: "volume",
       series: "총 볼륨",
       tier: i,
-      glyph: "boltGlyph",
+      glyph: "dumbbell",
       centerLabel: `${t / 1000}`,
       subLabel: "t",
       name: `총 볼륨 ${t.toLocaleString()}kg`,
@@ -1428,7 +1315,7 @@ function buildBadges(data) {
       category: "volume",
       series: "총 칼로리",
       tier: i,
-      glyph: "trophy",
+      glyph: "boltGlyph",
       centerLabel: `${t / 1000}`,
       subLabel: "K",
       name: `총 칼로리 ${t.toLocaleString()}kcal`,
@@ -1444,7 +1331,7 @@ function buildBadges(data) {
     category: "style",
     series: "새벽반",
     tier: 1,
-    glyph: "sunrise",
+    glyph: "star",
     name: "새벽반",
     description: "오전 6시 이전에 운동을 기록했어요",
     achievedDate: data.dawnLog ? data.dawnLog.date : null,
@@ -1464,7 +1351,7 @@ function buildBadges(data) {
     category: "style",
     series: "주말전사",
     tier: 3,
-    glyph: "flag",
+    glyph: "shield",
     centerLabel: "5",
     subLabel: "주",
     name: "주말전사",
@@ -1536,7 +1423,7 @@ function buildBadges(data) {
     category: "style",
     series: "계획형 인간",
     tier: 2,
-    glyph: "checklist",
+    glyph: "starOutline",
     centerLabel: "5",
     subLabel: "루틴",
     name: "계획형 인간",
@@ -1602,7 +1489,7 @@ function buildBadges(data) {
     category: "special",
     series: "꾸준함의 힘",
     tier: 3,
-    glyph: "calendar",
+    glyph: "calendarStack",
     centerLabel: "90",
     subLabel: "일",
     name: "꾸준함의 힘",
@@ -1615,7 +1502,7 @@ function buildBadges(data) {
     category: "special",
     series: "반년의 여정",
     tier: 4,
-    glyph: "calendar",
+    glyph: "calendarStack",
     centerLabel: "180",
     subLabel: "일",
     name: "반년의 여정",
@@ -1628,7 +1515,7 @@ function buildBadges(data) {
     category: "special",
     series: "1년의 기적",
     tier: 5,
-    glyph: "trophy",
+    glyph: "crown",
     centerLabel: "365",
     subLabel: "일",
     name: "1년의 기적",
@@ -1641,7 +1528,7 @@ function buildBadges(data) {
     category: "special",
     series: "계절을 넘어",
     tier: 4,
-    glyph: "seasons",
+    glyph: "leaf",
     name: "계절을 넘어",
     description: "봄, 여름, 가을, 겨울 모두 운동을 기록했어요",
     achievedDate: data.allSeasonsDate,
@@ -1697,7 +1584,7 @@ function buildBadges(data) {
       category: "milestone",
       series: "누적 세트",
       tier: [1, 3, 5][i],
-      glyph: "dumbbell",
+      glyph: "tower",
       centerLabel: `${t}`,
       subLabel: "SET",
       name: `${t}세트`,
@@ -1711,7 +1598,7 @@ function buildBadges(data) {
     category: "milestone",
     series: "오늘만큼은",
     tier: 2,
-    glyph: "dumbbell",
+    glyph: "tower",
     centerLabel: "10",
     subLabel: "세트",
     name: "오늘만큼은",
@@ -1724,7 +1611,7 @@ function buildBadges(data) {
     category: "milestone",
     series: "볼륨킹",
     tier: 2,
-    glyph: "boltGlyph",
+    glyph: "crown",
     centerLabel: "5",
     subLabel: "t",
     name: "볼륨킹",
@@ -1737,7 +1624,7 @@ function buildBadges(data) {
     category: "milestone",
     series: "슈퍼볼륨",
     tier: 4,
-    glyph: "boltGlyph",
+    glyph: "crown",
     centerLabel: "10",
     subLabel: "t",
     name: "슈퍼볼륨",
@@ -1763,7 +1650,7 @@ function buildBadges(data) {
     category: "milestone",
     series: "기구마스터",
     tier: 3,
-    glyph: "dumbbell",
+    glyph: "key",
     centerLabel: "20",
     subLabel: "기구",
     name: "기구마스터",
@@ -1788,7 +1675,7 @@ function buildBadges(data) {
     category: "challenge",
     series: "30일 챌린지",
     tier: 4,
-    glyph: "flame",
+    glyph: "flameCalendar",
     centerLabel: "30",
     subLabel: "일",
     name: "30일 챌린지",
@@ -1814,7 +1701,7 @@ function buildBadges(data) {
     category: "challenge",
     series: "체지방버너",
     tier: 3,
-    glyph: "bodyfatDrop",
+    glyph: "fatBurn",
     centerLabel: "10",
     subLabel: "K",
     name: "체지방버너",
@@ -1837,7 +1724,7 @@ function buildBadges(data) {
     category: "challenge",
     series: "퍼펙트위크",
     tier: 3,
-    glyph: "checklist",
+    glyph: "check",
     name: "퍼펙트위크",
     description: "한 주에 웨이트, 러닝, 프로틴을 모두 기록했어요",
     achievedDate: data.perfectWeekDate,
@@ -1914,7 +1801,7 @@ function buildBadges(data) {
     category: "hidden",
     series: "작심삼일",
     tier: 1,
-    glyph: "flame",
+    glyph: "smiley",
     name: "작심삼일",
     description: "그 불타던 의지, 어디로 갔을까요? (실패해도 괜찮아요!)",
     achievedDate: data.threeDayMonkDate,
@@ -1934,7 +1821,7 @@ function buildBadges(data) {
     category: "hidden",
     series: "완벽주의자",
     tier: 3,
-    glyph: "checklist",
+    glyph: "check",
     name: "완벽주의자",
     description: "한 가지에 꽂히면 끝을 보는 타입이군요",
     achievedDate: data.perfectionistDate,
@@ -2009,7 +1896,7 @@ function buildBadges(data) {
     category: "hidden",
     series: "전설의 시작",
     tier: 5,
-    glyph: "trophy",
+    glyph: "fiveStars",
     name: "전설의 시작",
     description: "당신은 이미 많은 걸 해냈어요",
     achievedDate: null, // buildBadges() 마지막에 별도 계산

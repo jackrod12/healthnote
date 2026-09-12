@@ -1447,59 +1447,77 @@ function formatBadgeDate(dateStr) {
   return `${y}.${m}.${d}`;
 }
 
+/* 1~6번 카테고리(PR/연속/유산소/인바디/생활습관/볼륨): 시리즈별 가로 스크롤 행
+   7~11번 카테고리(스타일/특별/마일스톤/챌린지/히든): 필터 없이 grid로 나열 */
+const SERIES_GROUPED_CATEGORIES = new Set(["pr", "연속", "cardio", "inbody", "lifestyle", "volume"]);
+
 function renderBadgeCard(b) {
-  const icon = renderBadgeIconSvg(b, { width: 72, height: 85 });
+  const icon = renderBadgeIconSvg(b, { width: 56, height: 56 });
   return `
     <button type="button" class="badge-card${b.achieved ? " achieved" : ""}" data-badge-id="${b.id}" aria-label="${b.name}">
       ${icon}
     </button>`;
 }
 
+function renderCategorySection(cat) {
+  const badgesInCat = allBadgesCache.filter((b) => b.category === cat.key);
+  if (!badgesInCat.length) return "";
+
+  const achievedCount = badgesInCat.filter((b) => b.achieved).length;
+  const header = `
+    <div class="badge-section-header">
+      <span class="badge-section-title">${cat.label}</span>
+      <span class="badge-section-count">${achievedCount} / ${badgesInCat.length}</span>
+    </div>`;
+
+  if (!SERIES_GROUPED_CATEGORIES.has(cat.key)) {
+    // 그냥 나열: 필터/구분 없이 achieved-first 정렬한 grid
+    const sorted = badgesInCat.slice().sort((a, b) => b.achieved - a.achieved);
+    const cards = sorted.map(renderBadgeCard).join("");
+    return `<section class="badge-section">${header}<div class="badge-flat-grid">${cards}</div></section>`;
+  }
+
+  // 같은 시리즈끼리 원래 순서 그대로 묶고, 다른 시리즈는 새 줄
+  const seriesOrder = [];
+  const seriesMap = new Map();
+  badgesInCat.forEach((b) => {
+    const key = b.series || b.name;
+    if (!seriesMap.has(key)) {
+      seriesMap.set(key, []);
+      seriesOrder.push(key);
+    }
+    seriesMap.get(key).push(b);
+  });
+
+  const rows = seriesOrder
+    .map((seriesName) => {
+      const badgesInSeries = seriesMap
+        .get(seriesName)
+        .slice()
+        .sort((a, b) => b.achieved - a.achieved);
+      const cards = badgesInSeries.map(renderBadgeCard).join("");
+      return `
+        <div class="badge-series-row">
+          <div class="badge-series-title">${seriesName}</div>
+          <div class="badge-series-scroll">${cards}</div>
+        </div>`;
+    })
+    .join("");
+
+  return `<section class="badge-section">${header}${rows}</section>`;
+}
+
 function renderBadgeSections() {
   const container = $("#badge-sections");
 
-  container.innerHTML = BADGE_CATEGORIES.map((cat) => {
-    const badgesInCat = allBadgesCache.filter((b) => b.category === cat.key);
-    if (!badgesInCat.length) return "";
+  const groupedHtml = BADGE_CATEGORIES.filter((c) => SERIES_GROUPED_CATEGORIES.has(c.key))
+    .map(renderCategorySection)
+    .join("");
+  const flatHtml = BADGE_CATEGORIES.filter((c) => !SERIES_GROUPED_CATEGORIES.has(c.key))
+    .map(renderCategorySection)
+    .join("");
 
-    const achievedCount = badgesInCat.filter((b) => b.achieved).length;
-
-    // 같은 시리즈끼리 원래 순서 그대로 묶는다 (achieved-first 정렬은 시리즈 행 내부에서만 적용)
-    const seriesOrder = [];
-    const seriesMap = new Map();
-    badgesInCat.forEach((b) => {
-      const key = b.series || b.name;
-      if (!seriesMap.has(key)) {
-        seriesMap.set(key, []);
-        seriesOrder.push(key);
-      }
-      seriesMap.get(key).push(b);
-    });
-
-    const rows = seriesOrder
-      .map((seriesName) => {
-        const badgesInSeries = seriesMap
-          .get(seriesName)
-          .slice()
-          .sort((a, b) => b.achieved - a.achieved);
-        const cards = badgesInSeries.map(renderBadgeCard).join("");
-        return `
-          <div class="badge-series-row">
-            <div class="badge-series-title">${seriesName}</div>
-            <div class="badge-series-scroll">${cards}</div>
-          </div>`;
-      })
-      .join("");
-
-    return `
-      <section class="badge-section">
-        <div class="badge-section-header">
-          <span class="badge-section-title">${cat.label}</span>
-          <span class="badge-section-count">${achievedCount} / ${badgesInCat.length}</span>
-        </div>
-        ${rows}
-      </section>`;
-  }).join("");
+  container.innerHTML = `${groupedHtml}<div class="badge-zone-divider"></div>${flatHtml}`;
 
   $$(".badge-card", container).forEach((card) => {
     card.addEventListener("click", () => openBadgeModal(card.dataset.badgeId));
@@ -1521,7 +1539,7 @@ function openBadgeModal(badgeId) {
   if (!badge) return;
 
   const categoryLabel = BADGE_CATEGORIES.find((c) => c.key === badge.category)?.label || badge.category;
-  $("#badge-modal-icon").innerHTML = renderBadgeIconSvg(badge, { width: 120, height: 142 });
+  $("#badge-modal-icon").innerHTML = renderBadgeIconSvg(badge, { width: 120, height: 120 });
   $("#badge-modal-icon").classList.toggle("achieved", badge.achieved);
   $("#badge-modal-name").textContent = badge.name;
   $("#badge-modal-category").textContent = categoryLabel;

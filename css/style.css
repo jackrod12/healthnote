@@ -975,11 +975,25 @@ input[type="range"] {
   display: none;
 }
 
+/* 7~11번 카테고리: 필터/구분 없이 grid로 나열 (wrap) */
+.badge-flat-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 1~6번(시리즈 그룹)과 7~11번(플랫 grid) 구역 사이 구분선 */
+.badge-zone-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 8px 0 24px;
+}
+
 /* 박스/카드 외곽선 없이 메달 SVG만 표시 */
 .badge-card {
   flex: none;
-  width: 72px;
-  height: 85px;
+  width: 56px;
+  height: 56px;
   padding: 0;
   border: none;
   background: transparent;
@@ -1017,7 +1031,7 @@ input[type="range"] {
 
 .badge-modal-icon {
   width: 120px;
-  height: 142px;
+  height: 120px;
   margin: 4px auto 0;
 }
 
