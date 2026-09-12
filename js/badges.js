@@ -330,6 +330,15 @@ function weekKeyOf(dateStr) {
 function isNextWeekKey(prevKey, curKey) {
   return addDaysStr(prevKey, 7) === curKey;
 }
+/* 월요일 시작 주의 월요일 날짜를 키로 반환 (오늘쉬어 뱃지 전용) */
+function mondayWeekKeyOf(dateStr) {
+  const d = parseDate(dateStr);
+  const day = d.getDay(); // 0=일 .. 6=토
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diffToMonday);
+  return formatDateObj(monday);
+}
 function byDateThenId(a, b) {
   if (a.date < b.date) return -1;
   if (a.date > b.date) return 1;
@@ -423,6 +432,9 @@ function computeRunningMaxByKeywords(weightLogsSorted, keywords) {
   }
   return points;
 }
+/* 기구별로 "이전 세션 최고 중량보다 현재 세션 최고 중량이 높을 때"만 PR 갱신으로
+   카운트한다. 그 기구의 첫 기록은 비교 대상(이전 최고 기록)이 없으므로 카운트하지
+   않는다. 무게없음(unit: "none") 세트는 애초에 필터링되어 계산에서 제외된다. */
 function computeAllPrEvents(weightLogsSorted) {
   const maxByEquipment = new Map();
   const events = [];
@@ -431,23 +443,28 @@ function computeAllPrEvents(weightLogsSorted) {
     if (!weights.length) continue;
     const logMax = Math.max(...weights);
     const key = log.equipmentName || "";
-    const prevMax = maxByEquipment.get(key) || 0;
-    if (logMax > prevMax) {
-      maxByEquipment.set(key, logMax);
+    const prevMax = maxByEquipment.get(key);
+    if (prevMax !== undefined && logMax > prevMax) {
       events.push({ date: log.date, value: events.length + 1 });
+    }
+    if (prevMax === undefined || logMax > prevMax) {
+      maxByEquipment.set(key, logMax);
     }
   }
   return events;
 }
-function computeInbodyDeltaPoints(sorted, field, direction) {
-  if (!sorted.length) return [];
-  const baseline = sorted[0][field];
-  if (baseline === null || baseline === undefined) return [];
+/* "가장 오래된 기록" 대비가 아니라, 그 시점까지의 "최고/최저 기록" 대비로 변화량을
+   계산한다 (direction "decrease"는 그동안의 최고값 대비 감소량, "increase"는 그동안의
+   최저값 대비 증가량). 중간에 쪘다가 빠지거나 근육이 줄었다가 다시 는 경우에도, 실제
+   달성한 최대 변화폭이 정확히 반영된다. */
+function computeInbodyExtremeDeltaPoints(sorted, field, direction) {
   const points = [];
+  let extreme = null;
   for (const r of sorted) {
     const v = r[field];
     if (v === null || v === undefined) continue;
-    const delta = direction === "decrease" ? baseline - v : v - baseline;
+    extreme = extreme === null ? v : direction === "decrease" ? Math.max(extreme, v) : Math.min(extreme, v);
+    const delta = direction === "decrease" ? extreme - v : v - extreme;
     points.push({ date: r.date, value: delta });
   }
   return points;
@@ -800,11 +817,22 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals
     }
   }
 
+  /* 오늘쉬어: 앱 사용 시작 후 "첫 주(월~일)"를 제외하고, 운동 기록이 하루도 없는
+     주(월~일)가 있으면 그 주의 마지막 날(일요일)을 달성일로 본다. */
   let restMattersDate = null;
-  for (let i = 0; i < allWorkoutDatesSorted.length - 1; i++) {
-    if (!isNextDay(allWorkoutDatesSorted[i], allWorkoutDatesSorted[i + 1])) {
-      restMattersDate = addDaysStr(allWorkoutDatesSorted[i], 1);
-      break;
+  if (allWorkoutDatesSorted.length) {
+    const weeksWithWorkout = new Set(allWorkoutDatesSorted.map(mondayWeekKeyOf));
+    const firstWeekMonday = mondayWeekKeyOf(allWorkoutDatesSorted[0]);
+    const todayMonday = mondayWeekKeyOf(todayStr);
+    let cursor = addDaysStr(firstWeekMonday, 7);
+    let safetyWeeks = 0;
+    while (cursor <= todayMonday && safetyWeeks < 2000) {
+      if (!weeksWithWorkout.has(cursor)) {
+        restMattersDate = addDaysStr(cursor, 6);
+        break;
+      }
+      cursor = addDaysStr(cursor, 7);
+      safetyWeeks += 1;
     }
   }
 
@@ -831,9 +859,9 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals
     cumulativeRunDistance: computeCumulativePoints(runningLogs, (l) => l.distance),
     cumulativeStairMinutes: computeCumulativePoints(stairLogs, (l) => l.duration / 60),
 
-    weightLossPoints: computeInbodyDeltaPoints(inbodySorted, "weight", "decrease"),
-    bodyFatDeltaPoints: computeInbodyDeltaPoints(inbodySorted, "bodyFat", "decrease"),
-    muscleGainPoints: computeInbodyDeltaPoints(inbodySorted, "muscleMass", "increase"),
+    weightLossPoints: computeInbodyExtremeDeltaPoints(inbodySorted, "weight", "decrease"),
+    bodyFatDeltaPoints: computeInbodyExtremeDeltaPoints(inbodySorted, "bodyFat", "decrease"),
+    muscleGainPoints: computeInbodyExtremeDeltaPoints(inbodySorted, "muscleMass", "increase"),
 
     proteinStreak: computeStreakAchievements(proteinDatesSorted),
     proteinDatesSorted,
