@@ -1448,7 +1448,7 @@ function formatBadgeDate(dateStr) {
 }
 
 function renderBadgeCard(b) {
-  const icon = renderBadgeIconSvg(b, { width: 64, height: 76 });
+  const icon = renderBadgeIconSvg(b, { width: 72, height: 85 });
   return `
     <button type="button" class="badge-card${b.achieved ? " achieved" : ""}" data-badge-id="${b.id}" aria-label="${b.name}">
       ${icon}

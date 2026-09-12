@@ -29,20 +29,26 @@ export const BADGE_CATEGORIES = [
 
 /* ---------------- 카테고리별 메달 얼굴 컬러 (그라디언트 2색) ---------------- */
 const CATEGORY_COLORS = {
-  pr: ["#1565C0", "#42A5F5"],
-  streak: ["#C62828", "#EF5350"],
-  cardio: ["#0277BD", "#29B6F6"],
-  inbody: ["#2E7D32", "#66BB6A"],
-  lifestyle: ["#6A1B9A", "#AB47BC"],
-  volume: ["#E65100", "#FFA726"],
-  style: ["#00838F", "#4DD0E1"],
-  special: ["#B8860B", "#FFD54F"],
-  challenge: ["#B8860B", "#FFD54F"],
-  hidden: ["#B8860B", "#FFD54F"],
+  pr: ["#8B0000", "#DC143C"],
+  streak: ["#1a1a1a", "#333333"],
+  cardio: ["#003087", "#0057B8"],
+  inbody: ["#1B5E20", "#2E7D32"],
+  lifestyle: ["#4A148C", "#7B1FA2"],
+  volume: ["#E65100", "#F57C00"],
+  style: ["#006064", "#00838F"],
+  special: ["#1A237E", "#283593"],
+  milestone: ["#37474F", "#546E7A"],
+  challenge: ["#1A237E", "#283593"],
+  hidden: ["#212121", "#424242"],
 };
 
-/* ---------------- 티어(단계)별 메탈릭 테두리 색: 청동→은→금→백금→다이아몬드→흑요석 ---------------- */
-const TIER_COLORS = ["#CD7F32", "#C0C0C0", "#FFD700", "#E5E4E2", "#B9F2FF", "#6B4E8E"];
+/* 외곽 테두리: 기본은 금색, 히든 카테고리만 은색 */
+const GOLD_BORDER = ["#B8860B", "#FFD700", "#FFA500"];
+const SILVER_BORDER = ["#9E9E9E", "#E8E8E8", "#B0B0B0"];
+const LAUREL_COLOR = "#B8860B";
+
+/* 뱃지 tier 값의 최대 인덱스 (0~5, 6단계) — 시리즈 내 순번 클램핑용 */
+const MAX_TIER_INDEX = 5;
 
 /* ---------------- 색상 유틸 ---------------- */
 function hexToRgb(hex) {
@@ -66,83 +72,88 @@ function darken(hex, amt) {
   return rgbToHex(r * (1 - amt), g * (1 - amt), b * (1 - amt));
 }
 
-/* ---------------- 뱃지 내부 글리프(작은 장식 아이콘, 0..40 좌표계) ---------------- */
+/* ---------------- 뱃지 내부 글리프: 굵고 단순한 형태 (0..40 좌표계) ---------------- */
 const GLYPHS = {
   barbellBench: `
-    <rect x="5" y="18" width="30" height="4" rx="2" fill="#fff"/>
-    <rect x="2" y="14" width="4" height="12" rx="2" fill="#fff"/>
-    <rect x="34" y="14" width="4" height="12" rx="2" fill="#fff"/>
-    <rect x="0" y="16" width="4" height="8" rx="1.5" fill="#fff"/>
-    <rect x="36" y="16" width="4" height="8" rx="1.5" fill="#fff"/>`,
+    <rect x="6" y="17" width="28" height="6" rx="2" fill="#fff"/>
+    <circle cx="7" cy="20" r="7" fill="#fff"/>
+    <circle cx="4" cy="20" r="4.5" fill="#fff"/>
+    <circle cx="33" cy="20" r="7" fill="#fff"/>
+    <circle cx="36" cy="20" r="4.5" fill="#fff"/>`,
   barbellSquat: `
-    <rect x="5" y="9" width="30" height="4" rx="2" fill="#fff"/>
-    <rect x="2" y="5" width="4" height="12" rx="2" fill="#fff"/>
-    <rect x="34" y="5" width="4" height="12" rx="2" fill="#fff"/>
-    <path d="M14 13 L11 30 M26 13 L29 30 M14 30 L20 36 L26 30" stroke="#fff" stroke-width="3.2"
-      fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
+    <rect x="6" y="8" width="28" height="6" rx="2" fill="#fff"/>
+    <circle cx="7" cy="11" r="6" fill="#fff"/>
+    <circle cx="33" cy="11" r="6" fill="#fff"/>
+    <path d="M14 14 L11 30 M26 14 L29 30 M13 30h6M21 30h6" stroke="#fff" stroke-width="4"
+      fill="none" stroke-linecap="round"/>`,
   barbellDeadlift: `
-    <rect x="5" y="27" width="30" height="4" rx="2" fill="#fff"/>
-    <rect x="2" y="23" width="4" height="12" rx="2" fill="#fff"/>
-    <rect x="34" y="23" width="4" height="12" rx="2" fill="#fff"/>
-    <path d="M20 21 V4 M14 10 L20 4 L26 10" stroke="#fff" stroke-width="3.2"
+    <rect x="6" y="26" width="28" height="6" rx="2" fill="#fff"/>
+    <circle cx="7" cy="29" r="6" fill="#fff"/>
+    <circle cx="33" cy="29" r="6" fill="#fff"/>
+    <path d="M20 23 V6 M13 12 L20 5 L27 12" stroke="#fff" stroke-width="4"
       fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
   dumbbell: `
-    <rect x="16" y="18" width="8" height="4" rx="1.5" fill="#fff"/>
-    <circle cx="9" cy="20" r="7" fill="#fff"/>
-    <circle cx="31" cy="20" r="7" fill="#fff"/>`,
-  flame: `<path d="M20 5c3 5-4 8-4 13a4 4 0 008 0c0-2-1-3-1-5 3 2 6 6 6 10a10 10 0 11-20 0c0-9 8-11 11-18z" fill="#fff"/>`,
+    <rect x="14" y="17" width="12" height="6" rx="2" fill="#fff"/>
+    <circle cx="8" cy="20" r="8" fill="#fff"/>
+    <circle cx="32" cy="20" r="8" fill="#fff"/>`,
+  flame: `
+    <path d="M20 3c9 9 13 15 13 22a13 13 0 01-26 0c0-4 1.5-7.5 4-11 .5 3 2 5 4 5 1-4 0-8 5-16z" fill="#FF7A1A"/>
+    <path d="M20 12c6 7 8 11 8 15.5a8 8 0 01-16 0c0-2.5 1-4.5 2.5-6.5.3 1.8 1.2 3 2.5 3 .6-2.5 0-5 3-12z" fill="#FF3B1F"/>
+    <path d="M20 20c2.5 3 3.5 5 3.5 7a3.5 3.5 0 01-7 0c0-1 .3-1.8.8-2.6.2.7.6 1.1 1.1 1.1.3-1.1 0-2.2 1.6-5.5z" fill="#FFC93B"/>`,
   calendar: `
-    <rect x="6" y="8" width="28" height="26" rx="3" stroke="#fff" stroke-width="2.5" fill="none"/>
-    <path d="M6 16h28" stroke="#fff" stroke-width="2.5"/>
-    <rect x="12" y="21" width="6" height="6" rx="1" fill="#fff"/>`,
+    <rect x="5" y="9" width="30" height="24" rx="3" fill="#fff"/>
+    <rect x="5" y="9" width="30" height="7" rx="3" fill="#00000030"/>
+    <circle cx="13" cy="6" r="3" fill="#fff"/>
+    <circle cx="27" cy="6" r="3" fill="#fff"/>`,
   shoe: `
-    <path d="M4 30c0-3 2-5 5-6l6-2 8-6c2-1 4-1 5 1l2 3h6a4 4 0 014 4v3a3 3 0 01-3 3H7a3 3 0 01-3-3z" fill="#fff"/>
-    <rect x="4" y="30" width="32" height="4" rx="2" fill="#fff" opacity="0.6"/>`,
-  heartbeat: `<path d="M3 21h7l3-8 5 14 4-10 2 4h13" stroke="#fff" stroke-width="3.5"
+    <ellipse cx="19" cy="17" rx="15" ry="7.5" fill="#fff" transform="rotate(-14 19 17)"/>
+    <rect x="4" y="23" width="32" height="6" rx="3" fill="#fff"/>`,
+  heartbeat: `<path d="M3 21h7l3-9 5 16 4-11 2 4h13" stroke="#fff" stroke-width="4"
     stroke-linecap="round" stroke-linejoin="round" fill="none"/>`,
-  stairs: `<path d="M4 34V26H12V20H20V14H28V8H36" stroke="#fff" stroke-width="4" fill="none"
+  stairs: `<path d="M4 34V26H12V20H20V14H28V8H36" stroke="#fff" stroke-width="5" fill="none"
     stroke-linecap="round" stroke-linejoin="round"/>`,
   scale: `
-    <rect x="4" y="10" width="32" height="24" rx="4" fill="#fff" opacity="0.22"/>
-    <rect x="4" y="10" width="32" height="24" rx="4" stroke="#fff" stroke-width="2.5" fill="none"/>
-    <circle cx="20" cy="23" r="5" fill="#fff"/>`,
+    <path d="M6 27 A14 14 0 0 1 34 27" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+    <path d="M20 27 L28 15" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="20" cy="27" r="4" fill="#fff"/>
+    <path d="M9 25l2.5-1.5M31 25l-2.5-1.5M20 11v3.5" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>`,
   muscle: `<path d="M10 30c-3-2-4-6-2-10 1-3 4-5 4-9 0-3 2-5 5-5 4 0 6 3 6 6 3-1 6 0 8 3 3 4 2 10-2 13-3 2-6 3-9 3H14c-1 0-3 0-4-1z" fill="#fff"/>`,
   bodyfatDrop: `
     <path d="M20 4c6 9 11 15 11 21a11 11 0 01-22 0c0-6 5-12 11-21z" fill="#fff" opacity="0.92"/>
     <path d="M14 26a6 6 0 006 6" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6"/>`,
   bmiCheck: `
-    <circle cx="20" cy="20" r="15" stroke="#fff" stroke-width="2.5" fill="none"/>
-    <path d="M12 20l5 5 11-11" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
+    <circle cx="20" cy="20" r="15" stroke="#fff" stroke-width="3" fill="none"/>
+    <path d="M12 20l5 5 11-11" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
   bottle: `
     <rect x="15" y="4" width="10" height="6" rx="2" fill="#fff"/>
     <path d="M13 12h14a2 2 0 012 2v18a4 4 0 01-4 4H15a4 4 0 01-4-4V14a2 2 0 012-2z" fill="#fff"/>`,
   glassX: `
-    <path d="M10 6h20l-3 22a3 3 0 01-3 3H16a3 3 0 01-3-3z" stroke="#fff" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
-    <path d="M14 12l12 12M26 12L14 24" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>`,
+    <path d="M10 6h20l-3 22a3 3 0 01-3 3H16a3 3 0 01-3-3z" stroke="#fff" stroke-width="3" fill="none" stroke-linejoin="round"/>
+    <path d="M14 12l12 12M26 12L14 24" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`,
   heart: `<path d="M20 34S5 24 5 14a8 8 0 0115-4 8 8 0 0115 4c0 10-15 20-15 20z" fill="#fff"/>`,
   trophy: `
     <path d="M12 6h16v10a8 8 0 01-16 0V6z" fill="#fff"/>
     <path d="M12 8H6a2 2 0 000 4c0 3 2 5 5 6M28 8h6a2 2 0 010 4c0 3-2 5-5 6"
-      stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
     <rect x="17" y="24" width="6" height="7" fill="#fff"/>
     <rect x="12" y="31" width="16" height="4" rx="1.5" fill="#fff"/>`,
-  boltGlyph: `<path d="M22 3 8 22h9l-3 15 17-21h-10l1-13z" fill="#fff"/>`,
+  boltGlyph: `<path d="M23 2 7 23h10l-4 15 20-22H21z" fill="#fff"/>`,
   sunrise: `
-    <path d="M4 24h32" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M4 24h32" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
     <path d="M10 24a10 10 0 0120 0" fill="#fff"/>
-    <path d="M20 6v4M10 10l3 3M30 10l-3 3" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>`,
+    <path d="M20 6v4M10 10l3 3M30 10l-3 3" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>`,
   moon: `<path d="M27 6a15 15 0 100 28 12 12 0 010-28z" fill="#fff"/>`,
   flag: `
-    <rect x="8" y="4" width="3" height="32" rx="1.5" fill="#fff"/>
-    <path d="M11 6h18l-5 7 5 7H11z" fill="#fff"/>`,
+    <rect x="8" y="4" width="4" height="32" rx="2" fill="#fff"/>
+    <path d="M12 6h18l-5 7 5 7H12z" fill="#fff"/>`,
   sunNoon: `
     <circle cx="20" cy="20" r="9" fill="#fff"/>
-    <path d="M20 3v5M20 32v5M3 20h5M32 20h5M8 8l3.5 3.5M28.5 28.5L32 32M8 32l3.5-3.5M28.5 11.5L32 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>`,
+    <path d="M20 3v5M20 32v5M3 20h5M32 20h5M8 8l3.5 3.5M28.5 28.5L32 32M8 32l3.5-3.5M28.5 11.5L32 8" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/>`,
   raindrop: `<path d="M20 4c6 9 11 16 11 22a11 11 0 01-22 0c0-6 5-13 11-22z" fill="#fff"/>`,
   checklist: `
-    <rect x="7" y="6" width="26" height="28" rx="3" stroke="#fff" stroke-width="2.3" fill="none"/>
-    <path d="M12 14l3 3 5-6M12 24l3 3 5-6" stroke="#fff" stroke-width="2.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M23 15h7M23 25h7" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/>`,
+    <rect x="7" y="6" width="26" height="28" rx="3" stroke="#fff" stroke-width="3" fill="none"/>
+    <path d="M12 14l3 3 5-6M12 24l3 3 5-6" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M23 15h7M23 25h7" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`,
   pencil: `<path d="M8 32l2-8 16-16 6 6-16 16-8 2z" fill="#fff"/>`,
   footprint: `
     <ellipse cx="16" cy="24" rx="6" ry="9" fill="#fff"/>
@@ -156,19 +167,19 @@ const GLYPHS = {
   starGlyph: `<path d="M20 3 L24.5 15.5 L38 16 L27.5 24 L31 37 L20 29.5 L9 37 L12.5 24 L2 16 L15.5 15.5 Z" fill="#fff"/>`,
   target: `
     <circle cx="20" cy="20" r="15" fill="#fff" opacity="0.25"/>
-    <circle cx="20" cy="20" r="15" stroke="#fff" stroke-width="2" fill="none"/>
-    <circle cx="20" cy="20" r="9" stroke="#fff" stroke-width="2" fill="none"/>
-    <circle cx="20" cy="20" r="3" fill="#fff"/>`,
+    <circle cx="20" cy="20" r="15" stroke="#fff" stroke-width="2.5" fill="none"/>
+    <circle cx="20" cy="20" r="9" stroke="#fff" stroke-width="2.5" fill="none"/>
+    <circle cx="20" cy="20" r="3.5" fill="#fff"/>`,
   chart: `
-    <path d="M6 34V10M6 34h28" stroke="#fff" stroke-width="2.3" fill="none" stroke-linecap="round"/>
-    <path d="M10 28l7-9 6 5 9-14" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
+    <path d="M6 34V10M6 34h28" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M10 28l7-9 6 5 9-14" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`,
   snowflake: `
-    <path d="M20 4v32M6 12l28 16M6 28l28-16" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
-    <path d="M20 4l-3 4M20 4l3 4M20 36l-3-4M20 36l3-4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>`,
+    <path d="M20 4v32M6 12l28 16M6 28l28-16" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/>
+    <path d="M20 4l-3 4M20 4l3 4M20 36l-3-4M20 36l3-4" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>`,
   turtle: `
     <ellipse cx="20" cy="22" rx="12" ry="9" fill="#fff"/>
     <circle cx="33" cy="20" r="4" fill="#fff"/>
-    <path d="M10 16l-4-2M10 28l-4 2M30 16l4-2M30 28l4 2" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>`,
+    <path d="M10 16l-4-2M10 28l-4 2M30 16l4-2M30 28l4 2" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`,
 };
 
 function escapeXml(str) {
@@ -181,16 +192,48 @@ function renderGlyph(glyphKey, x, y, w, h) {
   return `<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 40 40">${inner}</svg>`;
 }
 
-/* ---------------- 마라톤 완주 메달 SVG 생성 (viewBox 0 0 80 95) ---------------- */
+/* ---------------- 월계수 장식 (좌우 대칭, 원 중심 기준 배치) ---------------- */
+const LAUREL_LEAF_D = "M0 0 C-3.2 -2.2 -3.4 -6.4 0 -9.5 C3.4 -6.4 3.2 -2.2 0 0 Z";
+const LAUREL_LEFT_ANGLES = [108, 136, 164, 192, 220, 248];
+
+function laurelLeaf(cx, cy, r, angleDeg) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const x = cx + r * Math.cos(rad);
+  const y = cy + r * Math.sin(rad);
+  const rot = angleDeg + 90;
+  return `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${rot.toFixed(1)})"><path d="${LAUREL_LEAF_D}" fill="${LAUREL_COLOR}"/></g>`;
+}
+
+function laurelMarkup(cx, cy, r) {
+  return LAUREL_LEFT_ANGLES.map((a) => laurelLeaf(cx, cy, r, a) + laurelLeaf(cx, cy, r, 180 - a)).join("");
+}
+
+/* ---------------- 보석 장식 (4단계: 1개, 5단계: 3개) ---------------- */
+function gemMarkup(x, y, size) {
+  return `<path d="M${x} ${(y - size).toFixed(1)} L${(x + size * 0.78).toFixed(1)} ${y} L${x} ${(y + size).toFixed(1)} L${(x - size * 0.78).toFixed(1)} ${y} Z" fill="#FFD700" stroke="#B8860B" stroke-width="0.8"/>`;
+}
+
+/* ---------------- 세련된 메달 SVG 생성 (viewBox 0 0 80 95) ---------------- */
 export function renderBadgeIconSvg(badge, opts = {}) {
-  const w = opts.width || 64;
-  const h = opts.height || 76;
+  const w = opts.width || 72;
+  const h = opts.height || 85;
   const uid = badge.id.replace(/[^a-zA-Z0-9]/g, "");
-  const faceColors = CATEGORY_COLORS[badge.category] || CATEGORY_COLORS.pr;
-  const metal = TIER_COLORS[badge.tier % TIER_COLORS.length];
-  const metalLight = lighten(metal, 0.35);
-  const metalDark = darken(metal, 0.35);
-  const faceDark = darken(faceColors[0], 0.15);
+  const baseColors = CATEGORY_COLORS[badge.category] || CATEGORY_COLORS.pr;
+  const border = badge.category === "hidden" ? SILVER_BORDER : GOLD_BORDER;
+
+  // 시리즈 단계별 차별화: 배경은 단계가 오를수록 밝아지고, 3단계+ 하이라이트 링,
+  // 4단계 보석 1개, 5단계(이상) 보석 3개 + 두꺼운 테두리.
+  const tierLevel = Math.min(badge.tier ?? 0, 4);
+  const bgAmt = tierLevel * 0.1;
+  const faceTop = lighten(baseColors[1], bgAmt);
+  const faceBottom = lighten(baseColors[0], bgAmt * 0.6);
+  const borderWidth = tierLevel >= 4 ? 7 : 5;
+  const hasHighlightRing = tierLevel >= 2;
+  const gemCount = tierLevel === 3 ? 1 : tierLevel >= 4 ? 3 : 0;
+
+  const cx = 40;
+  const cy = 45;
+  const r = 32;
 
   const hasValue = !!badge.centerLabel;
   const ribbonText = badge.series || badge.name;
@@ -199,62 +242,74 @@ export function renderBadgeIconSvg(badge, opts = {}) {
 
   const iconMarkup = badge.glyph
     ? hasValue
-      ? renderGlyph(badge.glyph, 25, 13, 30, 24)
-      : renderGlyph(badge.glyph, 19, 12, 42, 36)
+      ? renderGlyph(badge.glyph, 24, 14, 32, 24)
+      : renderGlyph(badge.glyph, 16, 12, 48, 40)
     : "";
 
   const valueLen = hasValue ? `${badge.centerLabel}${badge.subLabel || ""}`.length : 0;
-  const valueFontSize = valueLen > 8 ? 7.5 : valueLen > 5 ? 9 : 11.5;
+  const valueFontSize = valueLen > 8 ? 8 : valueLen > 5 ? 9.5 : 12;
   const valueMarkup = hasValue
-    ? `<text x="40" y="75.5" text-anchor="middle" dominant-baseline="middle" font-size="${valueFontSize}" font-weight="800" fill="#fff" font-family="system-ui, -apple-system, sans-serif" paint-order="stroke" stroke="rgba(0,0,0,0.35)" stroke-width="2" stroke-linejoin="round">${escapeXml(
+    ? `<text x="40" y="60" text-anchor="middle" dominant-baseline="middle" font-size="${valueFontSize}" font-weight="800" fill="#fff" font-family="system-ui, -apple-system, sans-serif" paint-order="stroke" stroke="rgba(0,0,0,0.35)" stroke-width="2" stroke-linejoin="round">${escapeXml(
         `${badge.centerLabel}${badge.subLabel || ""}`.toUpperCase()
       )}</text>`
     : "";
 
+  const gemsMarkup =
+    gemCount === 1
+      ? gemMarkup(40, 16, 3.4)
+      : gemCount === 3
+        ? gemMarkup(40, 14, 3.4) + gemMarkup(25, 19, 2.6) + gemMarkup(55, 19, 2.6)
+        : "";
+
   return `<svg viewBox="0 0 80 95" width="${w}" height="${h}" class="badge-svg">
     <defs>
       <linearGradient id="face-${uid}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${faceColors[1]}"/>
-        <stop offset="60%" stop-color="${faceColors[0]}"/>
-        <stop offset="100%" stop-color="${faceDark}"/>
+        <stop offset="0%" stop-color="${faceTop}"/>
+        <stop offset="100%" stop-color="${faceBottom}"/>
       </linearGradient>
-      <linearGradient id="rim-${uid}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${metalLight}"/>
-        <stop offset="50%" stop-color="${metal}"/>
-        <stop offset="100%" stop-color="${metalDark}"/>
+      <linearGradient id="border-${uid}" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="${border[0]}"/>
+        <stop offset="50%" stop-color="${border[1]}"/>
+        <stop offset="100%" stop-color="${border[2]}"/>
       </linearGradient>
       <linearGradient id="ribbon-${uid}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#f2f2f4"/>
-        <stop offset="100%" stop-color="#c7c7cd"/>
+        <stop offset="0%" stop-color="#FFF8E1"/>
+        <stop offset="55%" stop-color="#E8C874"/>
+        <stop offset="100%" stop-color="#C9A227"/>
       </linearGradient>
-      <radialGradient id="hl-${uid}" cx="35%" cy="22%" r="60%">
-        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.5"/>
+      <radialGradient id="hl-${uid}" cx="35%" cy="20%" r="65%">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
         <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
       </radialGradient>
     </defs>
 
-    <!-- 상단 고리 -->
-    <rect x="32" y="0" width="16" height="9" rx="3" fill="url(#rim-${uid})"/>
+    <!-- 상단 클립 + 두 개 고리 -->
+    <rect x="31" y="0" width="18" height="7" rx="2" fill="url(#border-${uid})"/>
+    <circle cx="35" cy="12" r="4.5" fill="none" stroke="url(#border-${uid})" stroke-width="2.6"/>
+    <circle cx="45" cy="12" r="4.5" fill="none" stroke="url(#border-${uid})" stroke-width="2.6"/>
 
     <!-- 메달 본체 -->
-    <circle cx="40" cy="48" r="35" fill="url(#face-${uid})"/>
-    <circle cx="40" cy="48" r="35" fill="url(#hl-${uid})"/>
-    <circle cx="40" cy="48" r="35" fill="none" stroke="url(#rim-${uid})" stroke-width="4"/>
-    <circle cx="40" cy="48" r="31.5" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="1"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#face-${uid})"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#hl-${uid})"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#border-${uid})" stroke-width="${borderWidth}"/>
+    ${hasHighlightRing ? `<circle cx="${cx}" cy="${cy}" r="${r - borderWidth / 2 - 2}" fill="none" stroke="#FFD700" stroke-opacity="0.65" stroke-width="1.4"/>` : ""}
 
-    <!-- 아이콘 -->
+    <!-- 월계수 -->
+    ${laurelMarkup(cx, cy, r - 5)}
+
+    <!-- 아이콘 + 수치 -->
     ${iconMarkup}
+    ${valueMarkup}
 
-    <!-- 리본 배너 -->
-    <path d="M0 47 L13 41 L13 61 L0 67 Z" fill="${darken("#c7c7cd", 0.15)}"/>
-    <path d="M80 47 L67 41 L67 61 L80 67 Z" fill="${darken("#c7c7cd", 0.15)}"/>
-    <rect x="8" y="44" width="64" height="17" fill="url(#ribbon-${uid})"/>
-    <text x="40" y="55" text-anchor="middle" dominant-baseline="middle" font-size="${ribbonFontSize}" font-weight="800" fill="#2b2b33" font-family="system-ui, -apple-system, sans-serif" letter-spacing="0.2">${escapeXml(
+    <!-- 보석 장식 -->
+    ${gemsMarkup}
+
+    <!-- 곡선 배너 리본 -->
+    <path d="M8 66 Q40 78 72 66 L72 83 Q40 95 8 83 Z" fill="url(#ribbon-${uid})"/>
+    <path d="M8 66 Q40 78 72 66" fill="none" stroke="#B8860B" stroke-width="1" stroke-opacity="0.5"/>
+    <text x="40" y="78" text-anchor="middle" dominant-baseline="middle" font-size="${ribbonFontSize}" font-weight="800" fill="#3E2A00" font-family="system-ui, -apple-system, sans-serif" letter-spacing="0.2">${escapeXml(
       ribbonText.toUpperCase()
     )}</text>
-
-    <!-- 수치 -->
-    ${valueMarkup}
   </svg>`;
 }
 
@@ -1019,7 +1074,7 @@ function buildBadges(data) {
       id: `streak-days-${t}`,
       category: "streak",
       series: "연속 운동",
-      tier: Math.min(i, TIER_COLORS.length - 1),
+      tier: Math.min(i, MAX_TIER_INDEX),
       glyph: "flame",
       centerLabel: `${t}`,
       subLabel: "일",
@@ -1219,7 +1274,7 @@ function buildBadges(data) {
       id: `inbody-weight-loss-${t}`,
       category: "inbody",
       series: "체중 감량",
-      tier: Math.min(i, TIER_COLORS.length - 1),
+      tier: Math.min(i, MAX_TIER_INDEX),
       glyph: "scale",
       centerLabel: `-${t}`,
       subLabel: "kg",
