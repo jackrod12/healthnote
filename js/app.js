@@ -543,6 +543,10 @@ function normalizeEquipmentName(name) {
   return (name || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function normalizeCategory(cat) {
+  return (cat || "").trim().toLowerCase();
+}
+
 /* Matches a weight log to an equipment by equipmentId first; only falls back
    to a normalized (trimmed, case/whitespace-insensitive) equipmentName match
    when that id doesn't resolve to any currently-existing equipment — e.g.
@@ -563,15 +567,25 @@ function buildCategorySeries(allLogs, equipmentInCategory, equipmentList) {
   const equipmentIds = new Set(equipmentList.map((eq) => eq.id));
   const perEquip = equipmentInCategory
     .map((eq, i) => {
-      const points = allLogs
+      const rawPoints = allLogs
         .filter((l) => l.type === "weight" && logMatchesEquipment(l, eq, equipmentIds))
         .map((log) => {
           const weightsKg = log.sets.filter((s) => s.unit !== "none").map(toKg);
           if (!weightsKg.length) return null;
           return { date: log.date, maxWeight: Math.max(...weightsKg), logId: log.id };
         })
-        .filter(Boolean)
-        .sort((a, b) => (a.date < b.date ? -1 : 1));
+        .filter(Boolean);
+
+      // multiple logs of the same equipment on the same day (e.g. two
+      // separate sessions) must collapse into a single point — otherwise
+      // the chart plots several y-values at the same x-index and zigzags
+      const byDate = new Map();
+      rawPoints.forEach((p) => {
+        const existing = byDate.get(p.date);
+        if (!existing || p.maxWeight > existing.maxWeight) byDate.set(p.date, p);
+      });
+      const points = [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+
       return { name: eq.name, color: CHART_LINE_COLORS[i % CHART_LINE_COLORS.length], points };
     })
     .filter((e) => e.points.length);
@@ -580,7 +594,20 @@ function buildCategorySeries(allLogs, equipmentInCategory, equipmentList) {
 
   const allDates = new Set();
   perEquip.forEach((e) => e.points.forEach((p) => allDates.add(p.date)));
-  const recentDates = [...allDates].sort().slice(-20);
+  const recentDatesSet = new Set([...allDates].sort().slice(-20));
+
+  // an equipment logged less often than the rest of its category can end up
+  // with every one of its dates older than the shared "most recent 20"
+  // window above — which would drop it from the series filter below and
+  // make it vanish from the chart entirely despite having real data.
+  // Force its single latest point into the window so it always shows.
+  perEquip.forEach((e) => {
+    if (!e.points.length) return;
+    const hasVisiblePoint = e.points.some((p) => recentDatesSet.has(p.date));
+    if (!hasVisiblePoint) recentDatesSet.add(e.points[e.points.length - 1].date);
+  });
+
+  const recentDates = [...recentDatesSet].sort();
   const dateIndex = new Map(recentDates.map((d, i) => [d, i]));
 
   const series = perEquip
@@ -604,29 +631,44 @@ function renderChartLegend(el, series) {
     .join("");
 }
 
+const STAT_CHART_DEBUG_CATEGORIES = new Set(["가슴", "등", "하체"]);
+
 async function renderCategoryCharts(allLogs, equipmentList) {
   for (const cat of STAT_CATEGORIES) {
     const suffix = CATEGORY_CHART_SUFFIX[cat];
     const canvas = $(`#chart-cat-${suffix}`);
     const legendEl = $(`#legend-cat-${suffix}`);
     const emptyEl = $(`#empty-cat-${suffix}`);
-    // .trim() guards against a category value that's otherwise "가슴" but
-    // carries stray whitespace (e.g. from a manual DB edit or import), which
-    // would silently drop the equipment out of every category tab
-    const equipmentInCategory = equipmentList.filter((eq) => (eq.category || "").trim() === cat);
+    // normalized (trimmed + lowercased) comparison guards against a category
+    // value that's otherwise "가슴" but carries stray whitespace or mixed
+    // casing (e.g. from a manual DB edit or import), which would otherwise
+    // silently drop the equipment out of every category tab
+    const equipmentInCategory = equipmentList.filter((eq) => normalizeCategory(eq.category) === normalizeCategory(cat));
     const { dateLabels, series } = buildCategorySeries(allLogs, equipmentInCategory, equipmentList);
 
-    if (cat === "가슴") {
+    if (STAT_CHART_DEBUG_CATEGORIES.has(cat)) {
+      const equipmentIds = new Set(equipmentList.map((eq) => eq.id));
       console.log(
-        "[운동통계 디버그] 전체 기구 목록 (category 값 확인용):",
-        equipmentList.map((eq) => ({ id: eq.id, name: eq.name, category: JSON.stringify(eq.category) }))
+        `[운동통계 디버그] "${cat}" category === 인 기구 전체 목록:`,
+        equipmentInCategory.map((eq) => ({ id: eq.id, name: eq.name, category: eq.category }))
       );
       console.log(
-        "[운동통계 디버그] 가슴 카테고리로 필터링된 기구:",
-        equipmentInCategory.map((eq) => ({ id: eq.id, name: eq.name }))
+        `[운동통계 디버그] "${cat}" 기구와 매칭되는 workoutLogs:`,
+        equipmentInCategory.flatMap((eq) =>
+          allLogs
+            .filter((l) => l.type === "weight" && logMatchesEquipment(l, eq, equipmentIds))
+            .map((l) => ({
+              logId: l.id,
+              date: l.date,
+              matchedTo: eq.name,
+              equipmentId: l.equipmentId,
+              equipmentName: l.equipmentName,
+              sets: l.sets,
+            }))
+        )
       );
       console.log(
-        "[운동통계 디버그] 가슴 카테고리 매칭 결과 (기구별 데이터 포인트 수):",
+        `[운동통계 디버그] "${cat}" 차트에 실제로 그려지는 기구별 데이터 포인트 수:`,
         series.map((s) => ({ name: s.name, points: s.points.length }))
       );
     }
