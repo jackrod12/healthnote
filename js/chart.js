@@ -16,16 +16,48 @@ export const CHART_LINE_COLORS = [
    shrinks as more points are added. */
 const X_EDGE_MARGIN_FRAC = 0.08;
 
+/* shared visual settings for every "운동 통계" chart (all 6 body-part
+   category charts, plus the running-pace and stairmaster charts) so they
+   render with identical padding, point size, and font sizes — every one of
+   those charts must go through drawMultiLineChart and read these, never a
+   locally hardcoded copy. */
+const STAT_CHART_PADDING = { top: 28, right: 16, bottom: 22, left: 44 };
+const STAT_CHART_POINT_RADIUS = 3.5;
+const STAT_CHART_AXIS_FONT = "11px system-ui";
+const STAT_CHART_VALUE_FONT = "9px system-ui";
+const STAT_CHART_DATE_FONT = "13px system-ui";
+const STAT_CHART_EMPTY_FONT = "13px system-ui";
+
 function xForIndex(i, n, plotW, plotLeft) {
   if (n <= 1) return plotLeft + 0.5 * plotW;
   return plotLeft + (X_EDGE_MARGIN_FRAC + (i / (n - 1)) * (1 - 2 * X_EDGE_MARGIN_FRAC)) * plotW;
 }
 
+/* Canvases inside a hidden tab panel ([hidden] -> display:none) report a
+   zero-size getBoundingClientRect(). Falling back to canvas.width/height in
+   that case is a trap: those are the *buffer* pixel counts we ourselves set
+   below (already multiplied by dpr), so redrawing a still-hidden canvas
+   would keep re-multiplying its own previous output on every render — the
+   chart balloons in logical size a little more each time, and once the tab
+   is finally shown, CSS squeezes that oversized buffer back down, making
+   fonts/points/padding look shrunken relative to a chart that was visible
+   (and therefore correctly measured) from the start. Caching the last
+   known-good CSS size per canvas — seeded from its pristine width/height
+   attributes before we ever touch them — avoids that entirely. */
+const nominalSizeCache = new WeakMap();
+
 function setupCanvasForDPR(canvas) {
   const dpr = window.devicePixelRatio || 1;
+  if (!nominalSizeCache.has(canvas)) {
+    nominalSizeCache.set(canvas, { width: canvas.width, height: canvas.height });
+  }
   const rect = canvas.getBoundingClientRect();
-  const cssWidth = rect.width || canvas.width;
-  const cssHeight = rect.height || canvas.height;
+  const cached = nominalSizeCache.get(canvas);
+  const cssWidth = rect.width || cached.width;
+  const cssHeight = rect.height || cached.height;
+  if (rect.width && rect.height) {
+    nominalSizeCache.set(canvas, { width: rect.width, height: rect.height });
+  }
   canvas.width = cssWidth * dpr;
   canvas.height = cssHeight * dpr;
   const ctx = canvas.getContext("2d");
@@ -199,13 +231,13 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
   const allValues = series.flatMap((s) => s.points.map((p) => p.value));
   if (!dateLabels.length || !allValues.length) {
     ctx.fillStyle = TEXT_DIM;
-    ctx.font = "13px system-ui";
+    ctx.font = STAT_CHART_EMPTY_FONT;
     ctx.textAlign = "center";
     ctx.fillText("데이터가 없어요", width / 2, height / 2);
     return;
   }
 
-  const padding = { top: 28, right: 16, bottom: 22, left: 44 };
+  const padding = STAT_CHART_PADDING;
   const plotW = width - padding.left - padding.right;
   const plotH = height - padding.top - padding.bottom;
 
@@ -231,7 +263,7 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
 
   // y-axis value labels
   ctx.fillStyle = TEXT_DIM;
-  ctx.font = "11px system-ui";
+  ctx.font = STAT_CHART_AXIS_FONT;
   ctx.textAlign = "right";
   for (let i = 0; i < tickCount; i++) {
     const y = padding.top + (plotH / (tickCount - 1)) * i;
@@ -287,7 +319,7 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
       const x = xFor(p.index) + (p._xOffset || 0);
       const y = yFor(p.value);
       ctx.beginPath();
-      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+      ctx.arc(x, y, STAT_CHART_POINT_RADIUS, 0, Math.PI * 2);
       ctx.fillStyle = s.color;
       ctx.fill();
       hitPoints.push({ x, y, seriesName: s.name, value: p.value, date: p.date, logId: p.logId });
@@ -300,7 +332,7 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
   // to match the series line; a label within 20px of an already-shown one
   // is skipped instead of overlapping it
   const shownLabelPoints = [];
-  ctx.font = "9px system-ui";
+  ctx.font = STAT_CHART_VALUE_FONT;
   ctx.textAlign = "left";
   series.forEach((s, si) => {
     seriesSorted[si].forEach((p) => {
@@ -320,7 +352,7 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
   const isShownIndex = (i) => i === 0 || i === n - 1 || i % step === 0;
 
   ctx.fillStyle = TEXT_DIM;
-  ctx.font = "13px system-ui";
+  ctx.font = STAT_CHART_DATE_FONT;
   ctx.textAlign = "center";
   const labelY = padding.top + plotH + 16;
   dateLabels.forEach((label, i) => {

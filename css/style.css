@@ -365,6 +365,13 @@ canvas {
   height: 130px;
 }
 
+/* every "운동 통계" chart (all body-part category charts + cardio pace/
+   stairmaster) shares this exact height so none renders larger or smaller
+   than another — keep in sync with STAT_CHART_PADDING etc. in chart.js */
+.stat-chart {
+  height: 200px;
+}
+
 /* Pill tabs (inbody chart metric selector) */
 .pill-row {
   display: flex;

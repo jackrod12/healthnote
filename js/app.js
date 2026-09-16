@@ -539,13 +539,32 @@ const CATEGORY_CHART_SUFFIX = { 가슴: "chest", 등: "back", 하체: "legs", �
 
 let allWorkoutLogsById = new Map();
 
+function normalizeEquipmentName(name) {
+  return (name || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/* Matches a weight log to an equipment by equipmentId first; only falls back
+   to a normalized (trimmed, case/whitespace-insensitive) equipmentName match
+   when that id doesn't resolve to any currently-existing equipment — e.g.
+   the log predates equipmentId, or its equipmentId is stale (the equipment
+   it pointed to was deleted and re-added under a new id). A log whose
+   equipmentId correctly resolves to a *different* equipment never falls
+   back to a name match, so same-named equipment in another category can't
+   get mixed in. */
+function logMatchesEquipment(log, eq, equipmentIds) {
+  const idIsResolvable = log.equipmentId != null && equipmentIds.has(log.equipmentId);
+  if (idIsResolvable) return log.equipmentId === eq.id;
+  return normalizeEquipmentName(log.equipmentName) === normalizeEquipmentName(eq.name);
+}
+
 /* builds per-equipment max-weight-per-log point series for one category, sharing
    one x-axis of the category's most recent 20 distinct dates */
-function buildCategorySeries(allLogs, equipmentInCategory) {
+function buildCategorySeries(allLogs, equipmentInCategory, equipmentList) {
+  const equipmentIds = new Set(equipmentList.map((eq) => eq.id));
   const perEquip = equipmentInCategory
     .map((eq, i) => {
       const points = allLogs
-        .filter((l) => l.type === "weight" && (l.equipmentId === eq.id || (l.equipmentId == null && l.equipmentName === eq.name)))
+        .filter((l) => l.type === "weight" && logMatchesEquipment(l, eq, equipmentIds))
         .map((log) => {
           const weightsKg = log.sets.filter((s) => s.unit !== "none").map(toKg);
           if (!weightsKg.length) return null;
@@ -591,8 +610,26 @@ async function renderCategoryCharts(allLogs, equipmentList) {
     const canvas = $(`#chart-cat-${suffix}`);
     const legendEl = $(`#legend-cat-${suffix}`);
     const emptyEl = $(`#empty-cat-${suffix}`);
-    const equipmentInCategory = equipmentList.filter((eq) => eq.category === cat);
-    const { dateLabels, series } = buildCategorySeries(allLogs, equipmentInCategory);
+    // .trim() guards against a category value that's otherwise "가슴" but
+    // carries stray whitespace (e.g. from a manual DB edit or import), which
+    // would silently drop the equipment out of every category tab
+    const equipmentInCategory = equipmentList.filter((eq) => (eq.category || "").trim() === cat);
+    const { dateLabels, series } = buildCategorySeries(allLogs, equipmentInCategory, equipmentList);
+
+    if (cat === "가슴") {
+      console.log(
+        "[운동통계 디버그] 전체 기구 목록 (category 값 확인용):",
+        equipmentList.map((eq) => ({ id: eq.id, name: eq.name, category: JSON.stringify(eq.category) }))
+      );
+      console.log(
+        "[운동통계 디버그] 가슴 카테고리로 필터링된 기구:",
+        equipmentInCategory.map((eq) => ({ id: eq.id, name: eq.name }))
+      );
+      console.log(
+        "[운동통계 디버그] 가슴 카테고리 매칭 결과 (기구별 데이터 포인트 수):",
+        series.map((s) => ({ name: s.name, points: s.points.length }))
+      );
+    }
 
     const hasData = series.length > 0;
     canvas.hidden = !hasData;
@@ -608,6 +645,20 @@ async function renderCategoryCharts(allLogs, equipmentList) {
   }
 }
 
+/* cardio charts are single-series, but still drawn through drawMultiLineChart
+   (not drawLineChart) so they share the exact same padding/point-size/font
+   constants as the body-part category charts above — see STAT_CHART_* in
+   chart.js. */
+function toSingleSeries(name, color, logsSorted, valueFn) {
+  return [
+    {
+      name,
+      color,
+      points: logsSorted.map((l, i) => ({ index: i, value: valueFn(l), date: l.date })),
+    },
+  ];
+}
+
 async function renderCardioCharts(allLogs) {
   const runningLogs = allLogs.filter((l) => l.type === "running").sort((a, b) => (a.date < b.date ? -1 : 1));
   const recentRunning = runningLogs.slice(-20);
@@ -616,11 +667,11 @@ async function renderCardioCharts(allLogs) {
   paceCanvas.hidden = !recentRunning.length;
   paceEmpty.hidden = !!recentRunning.length;
   if (recentRunning.length) {
-    drawLineChart(
+    drawMultiLineChart(
       paceCanvas,
       recentRunning.map((l) => l.date.slice(5)),
-      recentRunning.map((l) => l.pace),
-      { color: "#4dabf7", unit: "분/km" }
+      toSingleSeries("러닝 페이스", "#4dabf7", recentRunning, (l) => l.pace),
+      { unit: "분/km" }
     );
   }
 
@@ -631,11 +682,11 @@ async function renderCardioCharts(allLogs) {
   stairCanvas.hidden = !recentStair.length;
   stairEmpty.hidden = !!recentStair.length;
   if (recentStair.length) {
-    drawLineChart(
+    drawMultiLineChart(
       stairCanvas,
       recentStair.map((l) => l.date.slice(5)),
-      recentStair.map((l) => l.level),
-      { color: "#ff922b", unit: "단계" }
+      toSingleSeries("천국의계단", "#ff922b", recentStair, (l) => l.level),
+      { unit: "단계" }
     );
   }
 }
