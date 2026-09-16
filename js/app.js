@@ -1,5 +1,5 @@
 import * as db from "./db.js";
-import { drawLineChart, drawMultiLineChart, attachChartClickHandler } from "./chart.js";
+import { drawLineChart, drawMultiLineChart, attachChartClickHandler, CHART_LINE_COLORS } from "./chart.js";
 import { evaluateAllBadges, renderBadgeIconSvg, formatProgressText, BADGE_CATEGORIES } from "./badges.js";
 
 /* ---------------- helpers ---------------- */
@@ -543,10 +543,6 @@ function toKg(set) {
 
 const STAT_CATEGORIES = ["가슴", "등", "하체", "어깨", "팔", "복근"];
 const CATEGORY_CHART_SUFFIX = { 가슴: "chest", 등: "back", 하체: "legs", 어깨: "shoulder", 팔: "arms", 복근: "abs" };
-const CHART_PALETTE = [
-  "#00e5a0", "#ff6b6b", "#4dabf7", "#ffd43b", "#c084fc",
-  "#ff922b", "#66d9e8", "#f783ac", "#94d82d", "#748ffc", "#e64980", "#20c997",
-];
 
 let allWorkoutLogsById = new Map();
 
@@ -564,7 +560,7 @@ function buildCategorySeries(allLogs, equipmentInCategory) {
         })
         .filter(Boolean)
         .sort((a, b) => (a.date < b.date ? -1 : 1));
-      return { name: eq.name, color: CHART_PALETTE[i % CHART_PALETTE.length], points };
+      return { name: eq.name, color: CHART_LINE_COLORS[i % CHART_LINE_COLORS.length], points };
     })
     .filter((e) => e.points.length);
 
@@ -600,10 +596,18 @@ async function renderCategoryCharts(allLogs, equipmentList) {
   for (const cat of STAT_CATEGORIES) {
     const suffix = CATEGORY_CHART_SUFFIX[cat];
     const canvas = $(`#chart-cat-${suffix}`);
+    const legendEl = $(`#legend-cat-${suffix}`);
+    const emptyEl = $(`#empty-cat-${suffix}`);
     const equipmentInCategory = equipmentList.filter((eq) => eq.category === cat);
     const { dateLabels, series } = buildCategorySeries(allLogs, equipmentInCategory);
 
-    renderChartLegend($(`#legend-cat-${suffix}`), series);
+    const hasData = series.length > 0;
+    canvas.hidden = !hasData;
+    legendEl.hidden = !hasData;
+    emptyEl.hidden = hasData;
+    if (!hasData) continue;
+
+    renderChartLegend(legendEl, series);
     drawMultiLineChart(canvas, dateLabels, series, { unit: "kg" });
     attachChartClickHandler(canvas, (point) => {
       if (point.logId != null) openEquipmentLogDetail(point.logId);
@@ -614,22 +618,50 @@ async function renderCategoryCharts(allLogs, equipmentList) {
 async function renderCardioCharts(allLogs) {
   const runningLogs = allLogs.filter((l) => l.type === "running").sort((a, b) => (a.date < b.date ? -1 : 1));
   const recentRunning = runningLogs.slice(-20);
-  drawLineChart(
-    $("#chart-cardio-pace"),
-    recentRunning.map((l) => l.date.slice(5)),
-    recentRunning.map((l) => l.pace),
-    { color: "#4dabf7", unit: "분/km" }
-  );
+  const paceCanvas = $("#chart-cardio-pace");
+  const paceEmpty = $("#empty-cardio-pace");
+  paceCanvas.hidden = !recentRunning.length;
+  paceEmpty.hidden = !!recentRunning.length;
+  if (recentRunning.length) {
+    drawLineChart(
+      paceCanvas,
+      recentRunning.map((l) => l.date.slice(5)),
+      recentRunning.map((l) => l.pace),
+      { color: "#4dabf7", unit: "분/km" }
+    );
+  }
 
   const stairLogs = allLogs.filter((l) => l.type === "stairmaster").sort((a, b) => (a.date < b.date ? -1 : 1));
   const recentStair = stairLogs.slice(-20);
-  drawLineChart(
-    $("#chart-cardio-stairmaster"),
-    recentStair.map((l) => l.date.slice(5)),
-    recentStair.map((l) => l.level),
-    { color: "#ff922b", unit: "단계" }
-  );
+  const stairCanvas = $("#chart-cardio-stairmaster");
+  const stairEmpty = $("#empty-cardio-stairmaster");
+  stairCanvas.hidden = !recentStair.length;
+  stairEmpty.hidden = !!recentStair.length;
+  if (recentStair.length) {
+    drawLineChart(
+      stairCanvas,
+      recentStair.map((l) => l.date.slice(5)),
+      recentStair.map((l) => l.level),
+      { color: "#ff922b", unit: "단계" }
+    );
+  }
 }
+
+/* ---------------- workout tab: stats category tabs ---------------- */
+
+let selectedStatsCategory = "가슴";
+
+function switchStatsCategoryTab(cat) {
+  selectedStatsCategory = cat;
+  $$(".pill", $("#stats-category-tabs")).forEach((b) => b.classList.toggle("active", b.dataset.cat === cat));
+  $$(".stats-panel").forEach((panel) => {
+    panel.hidden = panel.dataset.cat !== cat;
+  });
+}
+
+$$(".pill", $("#stats-category-tabs")).forEach((btn) => {
+  btn.addEventListener("click", () => switchStatsCategoryTab(btn.dataset.cat));
+});
 
 async function openEquipmentLogDetail(logId) {
   const log = allWorkoutLogsById.get(logId);
@@ -755,6 +787,7 @@ async function renderWorkoutStats() {
   allWorkoutLogsById = new Map(allLogs.map((l) => [l.id, l]));
   await renderCategoryCharts(allLogs, equipmentList);
   await renderCardioCharts(allLogs);
+  switchStatsCategoryTab(selectedStatsCategory);
 }
 
 /* manual ordering: sortOrder is a lazily-assigned field (see reorderWorkoutLogs).
@@ -961,6 +994,28 @@ $("#form-save-routine").addEventListener("submit", async (e) => {
   showToast("루틴이 저장되었어요");
 });
 
+/* a routine's "last used" date: the most recent date on which workoutLogs
+   contain every one of the routine's equipment names (not necessarily as a
+   single log, just all present somewhere that day) */
+async function findRoutineLastUsedDate(routine, allLogs) {
+  const namesNeeded = routine.exercises.map((ex) => ex.equipmentName);
+  if (!namesNeeded.length) return null;
+
+  const namesByDate = new Map();
+  allLogs.forEach((l) => {
+    if (l.type !== "weight") return;
+    if (!namesByDate.has(l.date)) namesByDate.set(l.date, new Set());
+    namesByDate.get(l.date).add(l.equipmentName);
+  });
+
+  const matchingDates = [...namesByDate.entries()]
+    .filter(([, namesOnDate]) => namesNeeded.every((n) => namesOnDate.has(n)))
+    .map(([date]) => date)
+    .sort();
+
+  return matchingDates.length ? matchingDates[matchingDates.length - 1] : null;
+}
+
 async function renderRoutineList() {
   const routines = await db.getRoutines();
   const container = $("#routine-list");
@@ -968,22 +1023,27 @@ async function renderRoutineList() {
     container.innerHTML = `<p class="empty-hint">저장된 루틴이 없어요.</p>`;
     return;
   }
+  const allLogs = await db.getAllWorkoutLogs();
   container.innerHTML = "";
-  routines.forEach((r) => {
+  for (const r of routines) {
+    const lastUsedDate = await findRoutineLastUsedDate(r, allLogs);
     const div = document.createElement("div");
-    div.className = "log-item";
-    const summary = r.exercises.map((ex) => ex.equipmentName).join(", ");
+    div.className = "log-item routine-item";
+    const exerciseLines = r.exercises.map((ex) => `<div>${ex.equipmentName} (${ex.sets.length}세트)</div>`).join("");
+    const lastUsedText = lastUsedDate ? `마지막 사용: ${lastUsedDate}` : "아직 사용 기록 없음";
     div.innerHTML = `
       <div class="log-main">
         <span class="log-title">${r.name}</span>
-        <span class="log-sub">${r.exercises.length}개 운동 · ${summary}</span>
+        <div class="routine-exercise-lines">${exerciseLines}</div>
+        <span class="log-sub routine-last-used">${lastUsedText}</span>
       </div>
       <div class="set-item-actions">
         <button type="button" class="btn btn-primary btn-sm routine-apply" data-id="${r.id}">불러오기</button>
+        <button type="button" class="icon-btn routine-edit" data-id="${r.id}">✏️</button>
         <button type="button" class="log-delete routine-delete" data-id="${r.id}">✕</button>
       </div>`;
     container.appendChild(div);
-  });
+  }
 
   $$(".routine-apply", container).forEach((btn) => {
     btn.addEventListener("click", () => applyRoutine(Number(btn.dataset.id)));
@@ -995,7 +1055,106 @@ async function renderRoutineList() {
       await renderRoutineList();
     });
   });
+  $$(".routine-edit", container).forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.id);
+      const routine = (await db.getRoutines()).find((r) => r.id === id);
+      if (routine) openEditRoutineModal(routine);
+    });
+  });
 }
+
+/* ---------------- routine editing ---------------- */
+
+let editingRoutineId = null;
+let editingRoutineCreatedAt = null;
+let editingRoutineExercises = [];
+
+function renderEditRoutineExerciseList() {
+  const container = $("#edit-routine-exercise-list");
+  if (!editingRoutineExercises.length) {
+    container.innerHTML = `<p class="empty-hint">운동이 없어요.</p>`;
+    return;
+  }
+  container.innerHTML = "";
+  editingRoutineExercises.forEach((ex, i) => {
+    const div = document.createElement("div");
+    div.className = "log-item";
+    div.innerHTML = `
+      <div class="log-main">
+        <span class="log-title">${ex.equipmentName}</span>
+        <span class="log-sub">${ex.sets.length}세트</span>
+      </div>
+      <div class="log-item-actions">
+        <button type="button" class="icon-btn routine-ex-up" data-index="${i}" ${i === 0 ? "disabled" : ""}>▲</button>
+        <button type="button" class="icon-btn routine-ex-down" data-index="${i}" ${i === editingRoutineExercises.length - 1 ? "disabled" : ""}>▼</button>
+        <button type="button" class="log-delete routine-ex-delete" data-index="${i}">✕</button>
+      </div>`;
+    container.appendChild(div);
+  });
+
+  $$(".routine-ex-up", container).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const i = Number(btn.dataset.index);
+      if (i <= 0) return;
+      [editingRoutineExercises[i - 1], editingRoutineExercises[i]] = [editingRoutineExercises[i], editingRoutineExercises[i - 1]];
+      renderEditRoutineExerciseList();
+    });
+  });
+  $$(".routine-ex-down", container).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const i = Number(btn.dataset.index);
+      if (i >= editingRoutineExercises.length - 1) return;
+      [editingRoutineExercises[i], editingRoutineExercises[i + 1]] = [editingRoutineExercises[i + 1], editingRoutineExercises[i]];
+      renderEditRoutineExerciseList();
+    });
+  });
+  $$(".routine-ex-delete", container).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      editingRoutineExercises.splice(Number(btn.dataset.index), 1);
+      renderEditRoutineExerciseList();
+    });
+  });
+}
+
+function openEditRoutineModal(routine) {
+  editingRoutineId = routine.id;
+  editingRoutineCreatedAt = routine.createdAt ?? Date.now();
+  editingRoutineExercises = routine.exercises.map((ex) => ({ ...ex, sets: ex.sets.map((s) => ({ ...s })) }));
+  $("#edit-routine-name-input").value = routine.name;
+  renderEditRoutineExerciseList();
+  $("#modal-edit-routine").hidden = false;
+}
+
+function closeEditRoutineModal() {
+  $("#modal-edit-routine").hidden = true;
+  editingRoutineId = null;
+  editingRoutineCreatedAt = null;
+  editingRoutineExercises = [];
+}
+
+$("#btn-cancel-edit-routine").addEventListener("click", closeEditRoutineModal);
+
+$("#btn-save-edit-routine").addEventListener("click", async () => {
+  if (editingRoutineId == null) return;
+  const name = $("#edit-routine-name-input").value.trim();
+  if (!name) {
+    showToast("루틴 이름을 입력해주세요");
+    return;
+  }
+  if (!editingRoutineExercises.length) {
+    showToast("운동을 최소 1개 이상 남겨주세요");
+    return;
+  }
+  await db.updateRoutine(editingRoutineId, {
+    name,
+    exercises: editingRoutineExercises,
+    createdAt: editingRoutineCreatedAt,
+  });
+  closeEditRoutineModal();
+  await renderRoutineList();
+  showToast("루틴이 수정되었어요");
+});
 
 async function applyRoutine(routineId) {
   const routines = await db.getRoutines();
@@ -2231,6 +2390,7 @@ $("#form-edit-equipment").addEventListener("submit", async (e) => {
   await db.updateEquipment(editingEquipmentId, { name, manufacturer, category, memo, photo });
   if (existing) {
     await db.renameEquipmentInWorkoutLogs(editingEquipmentId, existing.name, name);
+    await db.renameEquipmentInRoutines(editingEquipmentId, existing.name, name);
   }
   closeEditEquipmentModal();
   await renderEquipmentList();

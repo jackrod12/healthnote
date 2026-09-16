@@ -493,6 +493,13 @@ input[type="range"] {
   opacity: 0.8;
 }
 
+.routine-exercise-lines {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
 .log-item .log-delete {
   background: none;
   border: none;

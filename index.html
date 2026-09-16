@@ -123,50 +123,70 @@
         <h2 class="card-title">운동 통계</h2>
         <p class="stats-hint">차트의 점을 누르면 그날의 상세 기록을 볼 수 있어요</p>
 
-        <div class="stats-block" id="stats-block-chest">
+        <div class="pill-row" id="stats-category-tabs">
+          <button type="button" class="pill active" data-cat="가슴">가슴</button>
+          <button type="button" class="pill" data-cat="등">등</button>
+          <button type="button" class="pill" data-cat="하체">하체</button>
+          <button type="button" class="pill" data-cat="어깨">어깨</button>
+          <button type="button" class="pill" data-cat="팔">팔</button>
+          <button type="button" class="pill" data-cat="복근">복근</button>
+          <button type="button" class="pill" data-cat="유산소">유산소</button>
+        </div>
+
+        <div class="stats-block stats-panel" id="stats-panel-chest" data-cat="가슴">
           <h3 class="stats-subtitle">가슴 · 최고 중량 추이 (kg)</h3>
           <div class="chart-legend" id="legend-cat-chest"></div>
           <canvas id="chart-cat-chest" width="380" height="200"></canvas>
+          <p class="empty-hint" id="empty-cat-chest" hidden>아직 기록이 없어요</p>
         </div>
 
-        <div class="stats-block" id="stats-block-back">
+        <div class="stats-block stats-panel" id="stats-panel-back" data-cat="등" hidden>
           <h3 class="stats-subtitle">등 · 최고 중량 추이 (kg)</h3>
           <div class="chart-legend" id="legend-cat-back"></div>
           <canvas id="chart-cat-back" width="380" height="200"></canvas>
+          <p class="empty-hint" id="empty-cat-back" hidden>아직 기록이 없어요</p>
         </div>
 
-        <div class="stats-block" id="stats-block-legs">
+        <div class="stats-block stats-panel" id="stats-panel-legs" data-cat="하체" hidden>
           <h3 class="stats-subtitle">하체 · 최고 중량 추이 (kg)</h3>
           <div class="chart-legend" id="legend-cat-legs"></div>
           <canvas id="chart-cat-legs" width="380" height="200"></canvas>
+          <p class="empty-hint" id="empty-cat-legs" hidden>아직 기록이 없어요</p>
         </div>
 
-        <div class="stats-block" id="stats-block-shoulder">
+        <div class="stats-block stats-panel" id="stats-panel-shoulder" data-cat="어깨" hidden>
           <h3 class="stats-subtitle">어깨 · 최고 중량 추이 (kg)</h3>
           <div class="chart-legend" id="legend-cat-shoulder"></div>
           <canvas id="chart-cat-shoulder" width="380" height="200"></canvas>
+          <p class="empty-hint" id="empty-cat-shoulder" hidden>아직 기록이 없어요</p>
         </div>
 
-        <div class="stats-block" id="stats-block-arms">
+        <div class="stats-block stats-panel" id="stats-panel-arms" data-cat="팔" hidden>
           <h3 class="stats-subtitle">팔 · 최고 중량 추이 (kg)</h3>
           <div class="chart-legend" id="legend-cat-arms"></div>
           <canvas id="chart-cat-arms" width="380" height="200"></canvas>
+          <p class="empty-hint" id="empty-cat-arms" hidden>아직 기록이 없어요</p>
         </div>
 
-        <div class="stats-block" id="stats-block-abs">
+        <div class="stats-block stats-panel" id="stats-panel-abs" data-cat="복근" hidden>
           <h3 class="stats-subtitle">복근 · 최고 중량 추이 (kg)</h3>
           <div class="chart-legend" id="legend-cat-abs"></div>
           <canvas id="chart-cat-abs" width="380" height="200"></canvas>
+          <p class="empty-hint" id="empty-cat-abs" hidden>아직 기록이 없어요</p>
         </div>
 
-        <div class="stats-block">
-          <h3 class="stats-subtitle">유산소 · 러닝 페이스 추이</h3>
-          <canvas id="chart-cardio-pace" class="mini-chart" width="380" height="160"></canvas>
-        </div>
+        <div class="stats-panel" id="stats-panel-cardio" data-cat="유산소" hidden>
+          <div class="stats-block">
+            <h3 class="stats-subtitle">유산소 · 러닝 페이스 추이</h3>
+            <canvas id="chart-cardio-pace" class="mini-chart" width="380" height="160"></canvas>
+            <p class="empty-hint" id="empty-cardio-pace" hidden>아직 기록이 없어요</p>
+          </div>
 
-        <div class="stats-block">
-          <h3 class="stats-subtitle">유산소 · 천국의계단 단계 추이</h3>
-          <canvas id="chart-cardio-stairmaster" class="mini-chart" width="380" height="160"></canvas>
+          <div class="stats-block">
+            <h3 class="stats-subtitle">유산소 · 천국의계단 단계 추이</h3>
+            <canvas id="chart-cardio-stairmaster" class="mini-chart" width="380" height="160"></canvas>
+            <p class="empty-hint" id="empty-cardio-stairmaster" hidden>아직 기록이 없어요</p>
+          </div>
         </div>
       </div>
     </section>
@@ -488,6 +508,22 @@
     </div>
     <div class="modal-actions">
       <button type="button" class="btn btn-ghost btn-block" id="btn-cancel-load-routine">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 루틴 수정 모달 -->
+<div class="modal-overlay" id="modal-edit-routine" hidden>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h2 class="card-title">루틴 수정</h2>
+    <div class="form-grid">
+      <label>루틴 이름<input type="text" id="edit-routine-name-input" /></label>
+    </div>
+    <div id="edit-routine-exercise-list" class="summary-list"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="btn-cancel-edit-routine">취소</button>
+      <button type="button" class="btn btn-primary" id="btn-save-edit-routine">저장</button>
     </div>
   </div>
 </div>

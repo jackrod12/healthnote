@@ -186,6 +186,33 @@ export async function renameEquipmentInWorkoutLogs(equipmentId, oldName, newName
   ]);
 }
 
+/**
+ * Keeps saved routines in sync with an equipment rename: within each
+ * routine's exercises array, any entry already linked by equipmentId gets
+ * its equipmentName updated, and any legacy entry that predates equipmentId
+ * (matched by its old equipmentName instead) gets equipmentName updated too.
+ */
+export async function renameEquipmentInRoutines(equipmentId, oldName, newName) {
+  const db = await getDB();
+  const routines = await db.getAll("routines");
+  const toUpdate = [];
+  for (const routine of routines) {
+    let changed = false;
+    const exercises = routine.exercises.map((ex) => {
+      const matches = ex.equipmentId === equipmentId || (ex.equipmentId == null && ex.equipmentName === oldName);
+      if (matches && ex.equipmentName !== newName) {
+        changed = true;
+        return { ...ex, equipmentName: newName };
+      }
+      return ex;
+    });
+    if (changed) toUpdate.push({ ...routine, exercises });
+  }
+  if (!toUpdate.length) return;
+  const tx = db.transaction("routines", "readwrite");
+  await Promise.all([...toUpdate.map((r) => tx.store.put(r)), tx.done]);
+}
+
 export async function getRecentWorkoutLogs(days = 7) {
   const db = await getDB();
   const all = await db.getAll("workoutLogs");
@@ -267,6 +294,11 @@ export async function getRoutines() {
 export async function addRoutine(routine) {
   const db = await getDB();
   return db.add("routines", routine);
+}
+
+export async function updateRoutine(id, data) {
+  const db = await getDB();
+  await db.put("routines", { ...data, id });
 }
 
 export async function deleteRoutine(id) {

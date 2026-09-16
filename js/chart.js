@@ -2,6 +2,25 @@ const MINT = "#00e5a0";
 const GRID = "#2a2a2a";
 const TEXT_DIM = "#9a9a9a";
 
+/* single source of truth for multi-series chart colors: both the line drawn
+   for a series (drawMultiLineChart) and its legend swatch (rendered by the
+   caller) must index into this exact same array, never a separate copy. */
+export const CHART_LINE_COLORS = [
+  "#00e5a0", "#ff6b6b", "#4dabf7", "#ffd43b", "#c084fc",
+  "#ff922b", "#66d9e8", "#f783ac", "#94d82d", "#748ffc", "#e64980", "#20c997",
+];
+
+/* Fixed 8%/84%/8% x-axis layout: the first point sits 8% of the plot width
+   in from the left, the last sits 8% in from the right, and points between
+   are spaced evenly across the remaining 84% — instead of a margin that
+   shrinks as more points are added. */
+const X_EDGE_MARGIN_FRAC = 0.08;
+
+function xForIndex(i, n, plotW, plotLeft) {
+  if (n <= 1) return plotLeft + 0.5 * plotW;
+  return plotLeft + (X_EDGE_MARGIN_FRAC + (i / (n - 1)) * (1 - 2 * X_EDGE_MARGIN_FRAC)) * plotW;
+}
+
 function setupCanvasForDPR(canvas) {
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
@@ -69,9 +88,9 @@ export function drawLineChart(canvas, labels, values, options = {}) {
   const range = max - min || 1;
   const yFor = (v) => padding.top + plotH - ((v - min) / range) * plotH;
   const n = values.length;
-  // center each point within its own slot instead of pinning the first/last
-  // point to the plot edges (which would touch the y-axis)
-  const xFor = (i) => padding.left + ((i + 0.5) / n) * plotW;
+  // fixed 8% edge margins so the first/last points sit inset from the plot
+  // edges rather than flush against them, with the rest evenly spaced
+  const xFor = (i) => xForIndex(i, n, plotW, padding.left);
 
   // grid lines: 5 evenly spaced ticks
   ctx.strokeStyle = GRID;
@@ -195,7 +214,7 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
   const range = max - min || 1;
   const yFor = (v) => padding.top + plotH - ((v - min) / range) * plotH;
   const n = dateLabels.length;
-  const xFor = (i) => padding.left + (n <= 1 ? 0.5 : i / (n - 1)) * plotW;
+  const xFor = (i) => xForIndex(i, n, plotW, padding.left);
 
   // grid lines
   ctx.strokeStyle = GRID;
