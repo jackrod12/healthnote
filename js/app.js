@@ -313,9 +313,9 @@ function renderMonthActivityStats(monthLogs, monthDrinkLogs) {
 
   $("#month-activity-stats").innerHTML = `
     <div class="activity-stat-item"><span>💪 웨이트 운동</span><span>${weightCount}회</span></div>
-    <div class="activity-stat-item"><span>🏃 유산소 운동</span><span>${runningCount}회</span></div>
+    <div class="activity-stat-item"><span>🏃 유산소 운동</span><span class="activity-stat-value-cardio">${runningCount}회</span></div>
     <div class="activity-stat-item"><span>💧 금주</span><span class="activity-stat-value-nodrink">${nodrinkCount}회</span></div>
-    <div class="activity-stat-item"><span>🥤 프로틴 섭취</span><span>${proteinCount}회</span></div>
+    <div class="activity-stat-item"><span>🥤 프로틴 섭취</span><span class="activity-stat-value-protein">${proteinCount}회</span></div>
   `;
 }
 

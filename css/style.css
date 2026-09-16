@@ -229,9 +229,9 @@ body {
 }
 
 .dot-weight { background: var(--mint); }
-.dot-running { background: #4aa3ff; }
+.dot-running { background: #ff6b35; }
 .dot-nodrink { background: #64b5f6; }
-.dot-protein { background: #b388ff; }
+.dot-protein { background: #a855f7; }
 
 .calendar-stats {
   margin-top: 12px;
@@ -263,6 +263,12 @@ body {
 }
 .activity-stat-value-nodrink {
   color: #64b5f6 !important;
+}
+.activity-stat-value-cardio {
+  color: #ff6b35 !important;
+}
+.activity-stat-value-protein {
+  color: #a855f7 !important;
 }
 
 /* Home calorie stats */
@@ -747,8 +753,8 @@ input[type="range"] {
   color: #05203a;
 }
 .drink-toggle-btn.active.drink-toggle-protein {
-  background: #b388ff;
-  border-color: #b388ff;
+  background: #a855f7;
+  border-color: #a855f7;
   color: #1e0a3d;
 }
 

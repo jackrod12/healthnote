@@ -67,20 +67,20 @@ function setupCanvasForDPR(canvas) {
 
 /**
  * Auto-computed y-axis range so the data sits well inside the plot area
- * instead of touching the top/bottom edges.
+ * instead of touching the top/bottom edges. Always a flat 15% of the data's
+ * own range top and bottom — computed from whatever values the caller
+ * passes in, so a category chart's range reflects only the equipment
+ * currently shown in that tab, never other categories' data.
  */
 function computeAutoYRange(values) {
   const dataMin = Math.min(...values);
   const dataMax = Math.max(...values);
-  if (values.length === 1) {
-    const pad = Math.abs(dataMin) * 0.1 || 1;
-    return { min: dataMin - pad, max: dataMax + pad };
-  }
   const range = dataMax - dataMin;
   if (range === 0) {
-    return { min: dataMin - 5, max: dataMax + 5 };
+    const pad = Math.max(Math.abs(dataMin) * 0.15, 5);
+    return { min: dataMin - pad, max: dataMax + pad };
   }
-  const pad = range * 0.2;
+  const pad = range * 0.15;
   return { min: dataMin - pad, max: dataMax + pad };
 }
 
@@ -328,21 +328,48 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
 
   canvas.__chartPoints = hitPoints;
 
-  // per-point value labels ("60kg") at the point's upper-right, 9px, colored
-  // to match the series line; a label within 20px of an already-shown one
-  // is skipped instead of overlapping it
+  // per-point value labels ("60kg") near each point, 9px, colored to match
+  // the series line:
+  // - alternate above/below by series index so two lines running close
+  //   together don't stack their labels on the same side
+  // - flip to whichever side actually has room when a point sits right at
+  //   the top or bottom of the plot area (so the label can't run into the
+  //   axis area above, or the date labels below)
+  // - flip from left- to right-anchored when the label would run past the
+  //   canvas's right edge (always true for the rightmost/most-recent point)
+  // - a label within 20px of an already-shown one is skipped instead of
+  //   overlapping it
   const shownLabelPoints = [];
   ctx.font = STAT_CHART_VALUE_FONT;
-  ctx.textAlign = "left";
+  const labelClearance = 10;
   series.forEach((s, si) => {
+    const preferAbove = si % 2 === 0;
     seriesSorted[si].forEach((p) => {
       const x = xFor(p.index) + (p._xOffset || 0);
       const y = yFor(p.value);
       const tooClose = shownLabelPoints.some((sp) => Math.hypot(sp.x - x, sp.y - y) <= 20);
       if (tooClose) return;
       shownLabelPoints.push({ x, y });
+
+      let above = preferAbove;
+      if (above && y - labelClearance < padding.top) above = false;
+      else if (!above && y + labelClearance > padding.top + plotH) above = true;
+      const labelY = above ? y - 6 : y + 14;
+
+      const text = `${p.value}${unit}`;
+      const textWidth = ctx.measureText(text).width;
+      let labelX = x + 6;
+      ctx.textAlign = "left";
+      if (labelX + textWidth > width - padding.right) {
+        labelX = x - 6;
+        ctx.textAlign = "right";
+      } else if (labelX < padding.left) {
+        labelX = padding.left;
+        ctx.textAlign = "left";
+      }
+
       ctx.fillStyle = s.color;
-      ctx.fillText(`${p.value}${unit}`, x + 6, y - 6);
+      ctx.fillText(text, labelX, labelY);
     });
   });
 
