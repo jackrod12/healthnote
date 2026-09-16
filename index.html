@@ -32,6 +32,43 @@
 
     <!-- 홈 -->
     <section class="view" id="view-home" data-view="home">
+      <div class="card calendar-card">
+        <div class="calendar-header">
+          <button type="button" class="calendar-nav-btn" id="btn-prev-month">‹</button>
+          <span id="calendar-month-label" class="calendar-month-label"></span>
+          <button type="button" class="calendar-nav-btn" id="btn-next-month">›</button>
+        </div>
+        <div class="calendar-weekdays">
+          <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+        </div>
+        <div class="calendar-grid" id="calendar-grid"></div>
+        <div class="calendar-stats" id="calendar-stats"></div>
+      </div>
+
+      <div class="card" id="calendar-day-detail" hidden>
+        <div class="section-header">
+          <h2 class="card-title" id="calendar-day-title"></h2>
+          <button class="btn btn-ghost btn-sm" id="btn-close-day-detail">닫기</button>
+        </div>
+        <div class="drink-toggle-row">
+          <button type="button" class="drink-toggle-btn drink-toggle-drink" id="btn-toggle-drink">🔴 음주</button>
+          <button type="button" class="drink-toggle-btn drink-toggle-light" id="btn-toggle-light">🟡 반주</button>
+          <button type="button" class="drink-toggle-btn drink-toggle-protein" id="btn-toggle-protein">🟣 프로틴</button>
+        </div>
+        <div id="calendar-day-memo" class="day-memo" hidden></div>
+        <div id="calendar-day-logs" class="summary-list"></div>
+      </div>
+
+      <div class="card" id="home-calorie-card">
+        <h2 class="card-title">칼로리 소모</h2>
+        <div id="home-calorie-stats" class="calorie-stats-grid"></div>
+      </div>
+
+      <div class="card" id="month-activity-card">
+        <h2 class="card-title">이번 달 통계</h2>
+        <div id="month-activity-stats" class="activity-stats-grid"></div>
+      </div>
+
       <div class="card">
         <h2 class="card-title">오늘 운동 요약</h2>
         <div id="home-workout-summary" class="summary-list">
@@ -47,43 +84,6 @@
       <div class="card" id="weight-prediction-card">
         <h2 class="card-title">목표 달성 예측</h2>
         <div id="weight-prediction-content"></div>
-      </div>
-
-      <div class="card calendar-card">
-        <div class="calendar-header">
-          <button type="button" class="calendar-nav-btn" id="btn-prev-month">‹</button>
-          <span id="calendar-month-label" class="calendar-month-label"></span>
-          <button type="button" class="calendar-nav-btn" id="btn-next-month">›</button>
-        </div>
-        <div class="calendar-weekdays">
-          <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
-        </div>
-        <div class="calendar-grid" id="calendar-grid"></div>
-        <div class="calendar-stats" id="calendar-stats"></div>
-      </div>
-
-      <div class="card" id="home-calorie-card">
-        <h2 class="card-title">칼로리 소모</h2>
-        <div id="home-calorie-stats" class="calorie-stats-grid"></div>
-      </div>
-
-      <div class="card" id="month-activity-card">
-        <h2 class="card-title">이번 달 통계</h2>
-        <div id="month-activity-stats" class="activity-stats-grid"></div>
-      </div>
-
-      <div class="card" id="calendar-day-detail" hidden>
-        <div class="section-header">
-          <h2 class="card-title" id="calendar-day-title"></h2>
-          <button class="btn btn-ghost btn-sm" id="btn-close-day-detail">닫기</button>
-        </div>
-        <div class="drink-toggle-row">
-          <button type="button" class="drink-toggle-btn drink-toggle-drink" id="btn-toggle-drink">🔴 음주</button>
-          <button type="button" class="drink-toggle-btn drink-toggle-light" id="btn-toggle-light">🟡 반주</button>
-          <button type="button" class="drink-toggle-btn drink-toggle-protein" id="btn-toggle-protein">🟣 프로틴</button>
-        </div>
-        <div id="calendar-day-memo" class="day-memo" hidden></div>
-        <div id="calendar-day-logs" class="summary-list"></div>
       </div>
     </section>
 
@@ -121,16 +121,52 @@
 
       <div class="card">
         <h2 class="card-title">운동 통계</h2>
+        <p class="stats-hint">차트의 점을 누르면 그날의 상세 기록을 볼 수 있어요</p>
 
-        <div class="stats-block">
-          <h3 class="stats-subtitle">기구별 최고 중량 추이</h3>
-          <select id="stats-equipment-select"></select>
-          <canvas id="chart-max-weight" width="380" height="200"></canvas>
+        <div class="stats-block" id="stats-block-chest">
+          <h3 class="stats-subtitle">가슴 · 최고 중량 추이 (kg)</h3>
+          <div class="chart-legend" id="legend-cat-chest"></div>
+          <canvas id="chart-cat-chest" width="380" height="200"></canvas>
+        </div>
+
+        <div class="stats-block" id="stats-block-back">
+          <h3 class="stats-subtitle">등 · 최고 중량 추이 (kg)</h3>
+          <div class="chart-legend" id="legend-cat-back"></div>
+          <canvas id="chart-cat-back" width="380" height="200"></canvas>
+        </div>
+
+        <div class="stats-block" id="stats-block-legs">
+          <h3 class="stats-subtitle">하체 · 최고 중량 추이 (kg)</h3>
+          <div class="chart-legend" id="legend-cat-legs"></div>
+          <canvas id="chart-cat-legs" width="380" height="200"></canvas>
+        </div>
+
+        <div class="stats-block" id="stats-block-shoulder">
+          <h3 class="stats-subtitle">어깨 · 최고 중량 추이 (kg)</h3>
+          <div class="chart-legend" id="legend-cat-shoulder"></div>
+          <canvas id="chart-cat-shoulder" width="380" height="200"></canvas>
+        </div>
+
+        <div class="stats-block" id="stats-block-arms">
+          <h3 class="stats-subtitle">팔 · 최고 중량 추이 (kg)</h3>
+          <div class="chart-legend" id="legend-cat-arms"></div>
+          <canvas id="chart-cat-arms" width="380" height="200"></canvas>
+        </div>
+
+        <div class="stats-block" id="stats-block-abs">
+          <h3 class="stats-subtitle">복근 · 최고 중량 추이 (kg)</h3>
+          <div class="chart-legend" id="legend-cat-abs"></div>
+          <canvas id="chart-cat-abs" width="380" height="200"></canvas>
         </div>
 
         <div class="stats-block">
-          <h3 class="stats-subtitle">기구별 운동 기록</h3>
-          <div id="equipment-log-table"></div>
+          <h3 class="stats-subtitle">유산소 · 러닝 페이스 추이</h3>
+          <canvas id="chart-cardio-pace" class="mini-chart" width="380" height="160"></canvas>
+        </div>
+
+        <div class="stats-block">
+          <h3 class="stats-subtitle">유산소 · 천국의계단 단계 추이</h3>
+          <canvas id="chart-cardio-stairmaster" class="mini-chart" width="380" height="160"></canvas>
         </div>
       </div>
     </section>
@@ -321,7 +357,7 @@
 <div class="modal-overlay" id="modal-add-workout" hidden>
   <div class="modal-sheet">
     <div class="modal-handle"></div>
-    <h2 class="card-title">운동 추가</h2>
+    <h2 class="card-title" id="modal-add-workout-title">운동 추가</h2>
 
     <div class="segmented" id="workout-type-toggle">
       <button class="segmented-btn active" data-type="weight">웨이트</button>
@@ -383,7 +419,7 @@
       <div class="pace-preview">페이스: <span id="running-pace-preview">-</span> 분/km</div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" id="btn-cancel-running">취소</button>
-        <button type="submit" class="btn btn-primary">추가</button>
+        <button type="submit" class="btn btn-primary" id="btn-finish-running">추가</button>
       </div>
     </form>
   </div>
@@ -468,6 +504,30 @@
     <div class="modal-actions">
       <button type="button" class="btn btn-primary btn-block" id="btn-close-badge-modal">닫기</button>
     </div>
+  </div>
+</div>
+
+<!-- 기구별 운동 기록 상세 팝업 (통계 차트 데이터 포인트 클릭 시) -->
+<div class="modal-overlay" id="modal-equipment-log-detail" hidden>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h2 class="card-title" id="equipment-log-detail-title"></h2>
+    <div id="equipment-log-detail-content"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-primary btn-block" id="btn-close-equipment-log-detail">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 새 뱃지 획득 팝업 -->
+<div class="modal-overlay modal-overlay-center" id="modal-new-badge" hidden>
+  <div class="modal-sheet badge-earned-sheet">
+    <h2 class="badge-earned-header">🏅 새 뱃지 획득!</h2>
+    <div class="badge-earned-icon achieved" id="new-badge-icon"></div>
+    <div class="badge-earned-name" id="new-badge-name"></div>
+    <p class="badge-earned-desc" id="new-badge-desc"></p>
+    <div class="badge-earned-date" id="new-badge-date"></div>
+    <button type="button" class="btn btn-primary btn-block" id="btn-confirm-new-badge">확인</button>
   </div>
 </div>
 

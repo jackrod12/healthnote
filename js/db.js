@@ -119,6 +119,11 @@ export async function addWorkoutLog(log) {
   return db.add("workoutLogs", log);
 }
 
+export async function updateWorkoutLog(id, data) {
+  const db = await getDB();
+  await db.put("workoutLogs", { ...data, id });
+}
+
 export async function deleteWorkoutLog(id) {
   const db = await getDB();
   await db.delete("workoutLogs", id);

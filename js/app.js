@@ -1,5 +1,5 @@
 import * as db from "./db.js";
-import { drawLineChart } from "./chart.js";
+import { drawLineChart, drawMultiLineChart, attachChartClickHandler } from "./chart.js";
 import { evaluateAllBadges, renderBadgeIconSvg, formatProgressText, BADGE_CATEGORIES } from "./badges.js";
 
 /* ---------------- helpers ---------------- */
@@ -59,6 +59,51 @@ function switchTab(target) {
 $$(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => switchTab(btn.dataset.target));
 });
+
+/* ---------------- new badge popup ----------------
+   badges aren't stored in the DB (evaluateAllBadges recomputes them from
+   scratch every time), so "new" is tracked separately via a settings key
+   listing every badge id already shown to the user. Any action that can
+   unlock a badge should call checkForNewBadges() afterwards. */
+
+const SEEN_BADGE_IDS_KEY = "seenBadgeIds";
+let newBadgePopupQueue = [];
+
+async function checkForNewBadges() {
+  const badges = await evaluateAllBadges();
+  const achievedIds = badges.filter((b) => b.achieved).map((b) => b.id);
+
+  const seen = await db.getSetting(SEEN_BADGE_IDS_KEY, null);
+  if (seen === null) {
+    // first run of this feature: baseline silently so existing achievements
+    // don't all pop up as "new" at once
+    await db.setSetting(SEEN_BADGE_IDS_KEY, achievedIds);
+    return;
+  }
+
+  const seenSet = new Set(seen);
+  const newlyAchieved = badges.filter((b) => b.achieved && !seenSet.has(b.id));
+  if (!newlyAchieved.length) return;
+
+  await db.setSetting(SEEN_BADGE_IDS_KEY, achievedIds);
+  newBadgePopupQueue.push(...newlyAchieved);
+  if (newBadgePopupQueue.length === newlyAchieved.length) showNextNewBadgePopup();
+}
+
+function showNextNewBadgePopup() {
+  if (!newBadgePopupQueue.length) {
+    $("#modal-new-badge").hidden = true;
+    return;
+  }
+  const badge = newBadgePopupQueue.shift();
+  $("#new-badge-icon").innerHTML = renderBadgeIconSvg(badge, { width: 100, height: 100 });
+  $("#new-badge-name").textContent = badge.name;
+  $("#new-badge-desc").textContent = badge.description;
+  $("#new-badge-date").textContent = `획득일: ${formatBadgeDate(badge.achievedDate)}`;
+  $("#modal-new-badge").hidden = false;
+}
+
+$("#btn-confirm-new-badge").addEventListener("click", showNextNewBadgePopup);
 
 /* ---------------- home tab ---------------- */
 
@@ -494,48 +539,119 @@ function toKg(set) {
   return set.unit === "lb" ? set.weight * LB_TO_KG : set.weight;
 }
 
-let statsEquipmentCache = [];
+/* ---------------- workout tab: per-category multi-line max-weight charts ---------------- */
 
-async function populateStatsEquipmentSelect() {
-  statsEquipmentCache = await db.getEquipmentList();
-  const select = $("#stats-equipment-select");
-  const prevValue = select.value;
-  select.innerHTML = statsEquipmentCache.length
-    ? statsEquipmentCache.map((e) => `<option value="${e.id}">${e.name} (${e.category})</option>`).join("")
-    : `<option value="">등록된 기구가 없어요</option>`;
-  if (statsEquipmentCache.some((e) => String(e.id) === prevValue)) {
-    select.value = prevValue;
+const STAT_CATEGORIES = ["가슴", "등", "하체", "어깨", "팔", "복근"];
+const CATEGORY_CHART_SUFFIX = { 가슴: "chest", 등: "back", 하체: "legs", 어깨: "shoulder", 팔: "arms", 복근: "abs" };
+const CHART_PALETTE = [
+  "#00e5a0", "#ff6b6b", "#4dabf7", "#ffd43b", "#c084fc",
+  "#ff922b", "#66d9e8", "#f783ac", "#94d82d", "#748ffc", "#e64980", "#20c997",
+];
+
+let allWorkoutLogsById = new Map();
+
+/* builds per-equipment max-weight-per-log point series for one category, sharing
+   one x-axis of the category's most recent 20 distinct dates */
+function buildCategorySeries(allLogs, equipmentInCategory) {
+  const perEquip = equipmentInCategory
+    .map((eq, i) => {
+      const points = allLogs
+        .filter((l) => l.type === "weight" && (l.equipmentId === eq.id || (l.equipmentId == null && l.equipmentName === eq.name)))
+        .map((log) => {
+          const weightsKg = log.sets.filter((s) => s.unit !== "none").map(toKg);
+          if (!weightsKg.length) return null;
+          return { date: log.date, maxWeight: Math.max(...weightsKg), logId: log.id };
+        })
+        .filter(Boolean)
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
+      return { name: eq.name, color: CHART_PALETTE[i % CHART_PALETTE.length], points };
+    })
+    .filter((e) => e.points.length);
+
+  if (!perEquip.length) return { dateLabels: [], series: [] };
+
+  const allDates = new Set();
+  perEquip.forEach((e) => e.points.forEach((p) => allDates.add(p.date)));
+  const recentDates = [...allDates].sort().slice(-20);
+  const dateIndex = new Map(recentDates.map((d, i) => [d, i]));
+
+  const series = perEquip
+    .map((e) => ({
+      name: e.name,
+      color: e.color,
+      points: e.points
+        .filter((p) => dateIndex.has(p.date))
+        .map((p) => ({ index: dateIndex.get(p.date), value: Math.round(p.maxWeight * 10) / 10, date: p.date, logId: p.logId })),
+    }))
+    .filter((s) => s.points.length);
+
+  return { dateLabels: recentDates.map((d) => d.slice(5)), series };
+}
+
+function renderChartLegend(el, series) {
+  el.innerHTML = series
+    .map(
+      (s) => `<span class="chart-legend-item"><span class="chart-legend-dot" style="background:${s.color}"></span>${s.name}</span>`
+    )
+    .join("");
+}
+
+async function renderCategoryCharts(allLogs, equipmentList) {
+  for (const cat of STAT_CATEGORIES) {
+    const suffix = CATEGORY_CHART_SUFFIX[cat];
+    const canvas = $(`#chart-cat-${suffix}`);
+    const equipmentInCategory = equipmentList.filter((eq) => eq.category === cat);
+    const { dateLabels, series } = buildCategorySeries(allLogs, equipmentInCategory);
+
+    renderChartLegend($(`#legend-cat-${suffix}`), series);
+    drawMultiLineChart(canvas, dateLabels, series, { unit: "kg" });
+    attachChartClickHandler(canvas, (point) => {
+      if (point.logId != null) openEquipmentLogDetail(point.logId);
+    });
   }
 }
 
-async function renderMaxWeightChart() {
-  const canvas = $("#chart-max-weight");
-  const equipmentId = Number($("#stats-equipment-select").value);
-  const equipment = statsEquipmentCache.find((e) => e.id === equipmentId);
-  if (!equipment) {
-    drawLineChart(canvas, [], []);
-    return;
-  }
-
-  const allLogs = await db.getAllWorkoutLogs();
-  const points = allLogs
-    .filter((l) => l.type === "weight" && l.equipmentName === equipment.name)
-    .map((log) => {
-      const weightsKg = log.sets.filter((s) => s.unit !== "none").map(toKg);
-      if (!weightsKg.length) return null;
-      return { date: log.date, maxWeight: Math.max(...weightsKg) };
-    })
-    .filter(Boolean)
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
-
-  const recent = points.slice(-20);
+async function renderCardioCharts(allLogs) {
+  const runningLogs = allLogs.filter((l) => l.type === "running").sort((a, b) => (a.date < b.date ? -1 : 1));
+  const recentRunning = runningLogs.slice(-20);
   drawLineChart(
-    canvas,
-    recent.map((p) => p.date.slice(5)),
-    recent.map((p) => Math.round(p.maxWeight * 10) / 10),
-    { color: "#00e5a0", unit: "kg" }
+    $("#chart-cardio-pace"),
+    recentRunning.map((l) => l.date.slice(5)),
+    recentRunning.map((l) => l.pace),
+    { color: "#4dabf7", unit: "분/km" }
+  );
+
+  const stairLogs = allLogs.filter((l) => l.type === "stairmaster").sort((a, b) => (a.date < b.date ? -1 : 1));
+  const recentStair = stairLogs.slice(-20);
+  drawLineChart(
+    $("#chart-cardio-stairmaster"),
+    recentStair.map((l) => l.date.slice(5)),
+    recentStair.map((l) => l.level),
+    { color: "#ff922b", unit: "단계" }
   );
 }
+
+async function openEquipmentLogDetail(logId) {
+  const log = allWorkoutLogsById.get(logId);
+  if (!log) return;
+  const bodyWeightKg = await getLatestBodyWeightKg();
+  const volume = calcLogVolume(log);
+  const calories = calcWeightLogCalories(log, bodyWeightKg);
+  $("#equipment-log-detail-title").textContent = `${log.equipmentName} · ${log.date}`;
+  $("#equipment-log-detail-content").innerHTML = `
+    <div class="log-table-detail">
+      ${log.sets.map((s, i) => `<div>세트${i + 1}: ${formatSet(s)}</div>`).join("")}
+    </div>
+    <div class="log-table-detail-totals">
+      <div>총 볼륨: ${Math.round(volume)}kg</div>
+      <div>추정 칼로리: 약 ${Math.round(calories)}kcal</div>
+    </div>`;
+  $("#modal-equipment-log-detail").hidden = false;
+}
+
+$("#btn-close-equipment-log-detail").addEventListener("click", () => {
+  $("#modal-equipment-log-detail").hidden = true;
+});
 
 /* estimated calories: strength training uses total volume(kg) x 0.05 x (body weight / 70),
    running uses MET x body weight(kg) x time(hours), with MET derived from pace(분/km) */
@@ -634,70 +750,12 @@ function calcLogCalories(log, bodyWeightKg) {
   return 0;
 }
 
-async function renderEquipmentLogTable() {
-  const container = $("#equipment-log-table");
-  const equipmentId = Number($("#stats-equipment-select").value);
-  const equipment = statsEquipmentCache.find((e) => e.id === equipmentId);
-  if (!equipment) {
-    container.innerHTML = `<p class="empty-hint">데이터가 없어요</p>`;
-    return;
-  }
-
-  const allLogs = await db.getAllWorkoutLogs();
-  const logs = allLogs
-    .filter((l) => l.type === "weight" && l.equipmentName === equipment.name)
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
-
-  if (!logs.length) {
-    container.innerHTML = `<p class="empty-hint">이 기구의 운동 기록이 없어요.</p>`;
-    return;
-  }
-
-  const bodyWeightKg = await getLatestBodyWeightKg();
-  const rows = logs
-    .map((log) => {
-      const volume = calcLogVolume(log);
-      const calories = calcWeightLogCalories(log, bodyWeightKg);
-      const setCount = log.sets.length;
-      return log.sets
-        .map((set, i) => {
-          if (i === 0) {
-            return `
-              <tr>
-                <td rowspan="${setCount}">${log.date}</td>
-                <td>세트${i + 1}: ${formatSet(set)}</td>
-                <td rowspan="${setCount}">${Math.round(volume)}kg</td>
-                <td rowspan="${setCount}">${Math.round(calories)}kcal</td>
-              </tr>`;
-          }
-          return `
-              <tr>
-                <td>세트${i + 1}: ${formatSet(set)}</td>
-              </tr>`;
-        })
-        .join("");
-    })
-    .join("");
-
-  container.innerHTML = `
-    <table class="log-table">
-      <thead>
-        <tr><th>날짜</th><th>세트</th><th>총 볼륨</th><th>추정 칼로리</th></tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
-
 async function renderWorkoutStats() {
-  await populateStatsEquipmentSelect();
-  await renderMaxWeightChart();
-  await renderEquipmentLogTable();
+  const [allLogs, equipmentList] = await Promise.all([db.getAllWorkoutLogs(), db.getEquipmentList()]);
+  allWorkoutLogsById = new Map(allLogs.map((l) => [l.id, l]));
+  await renderCategoryCharts(allLogs, equipmentList);
+  await renderCardioCharts(allLogs);
 }
-
-$("#stats-equipment-select").addEventListener("change", () => {
-  renderMaxWeightChart();
-  renderEquipmentLogTable();
-});
 
 /* manual ordering: sortOrder is a lazily-assigned field (see reorderWorkoutLogs).
    Logs without it fall back to id, which reproduces the original newest-first
@@ -822,10 +880,14 @@ async function renderWorkoutLogList(logs) {
       const checkboxHtml = reorderModeActive
         ? `<input type="checkbox" class="log-reorder-checkbox" data-id="${log.id}" ${reorderSelectedIds.has(log.id) ? "checked" : ""} />`
         : "";
+      const editButtonHtml = reorderModeActive
+        ? ""
+        : `<button type="button" class="icon-btn log-edit" data-id="${log.id}">✏️</button>`;
       div.innerHTML = `
         ${checkboxHtml}
         ${mainHtml}
         <div class="log-item-actions">
+          ${editButtonHtml}
           <button type="button" class="log-delete" data-id="${log.id}">✕</button>
         </div>`;
       container.appendChild(div);
@@ -852,6 +914,13 @@ async function renderWorkoutLogList(logs) {
       const refreshed = await db.getWorkoutLogsByDate(todayStr());
       await renderWorkoutLogList(refreshed);
       renderHomeWorkoutSummary(refreshed);
+    });
+  });
+
+  $$(".log-edit", container).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const log = ordered.find((l) => l.id === Number(btn.dataset.id));
+      if (log) startEditWorkoutLog(log);
     });
   });
 }
@@ -958,6 +1027,7 @@ async function applyRoutine(routineId) {
   const logs = await db.getWorkoutLogsByDate(todayStr());
   await renderWorkoutLogList(logs);
   renderHomeWorkoutSummary(logs);
+  await checkForNewBadges();
   showToast(`"${routine.name}" 루틴을 불러왔어요`);
 }
 
@@ -1176,6 +1246,66 @@ function resetSetEntryState() {
   updateEquipmentLock();
 }
 
+/* ---- 운동 기록 수정 모드 ---- */
+let editingLogId = null;
+let editingLogSnapshot = null;
+
+function setEditModeIndicator(text) {
+  $("#modal-add-workout-title").textContent = text || "운동 추가";
+  $("#btn-finish-weight").textContent = text ? "수정 완료" : "운동 완료";
+  $("#btn-finish-running").textContent = text ? "수정 완료" : "추가";
+  $$(".segmented-btn", $("#workout-type-toggle")).forEach((b) => (b.disabled = !!text));
+  $("#weight-equipment").disabled = !!text || currentSets.length > 0;
+}
+
+function setWorkoutTypeToggle(type) {
+  $$(".segmented-btn", $("#workout-type-toggle")).forEach((b) => b.classList.toggle("active", b.dataset.type === type));
+  $("#form-weight").hidden = type !== "weight";
+  $("#form-running").hidden = type !== "running";
+}
+
+async function startEditWorkoutLog(log) {
+  editingLogId = log.id;
+  editingLogSnapshot = log;
+  modalAddWorkout.hidden = false;
+
+  if (log.type === "running") {
+    setWorkoutTypeToggle("running");
+    $("#running-distance").value = log.distance;
+    $("#running-duration").value = log.duration;
+    updateRunningPacePreview();
+    setEditModeIndicator("✏️ 수정 중 — 러닝");
+    return;
+  }
+
+  setWorkoutTypeToggle("weight");
+  const equipment =
+    equipmentCache.find((eq) => eq.id === log.equipmentId) ??
+    equipmentCache.find((eq) => eq.name === log.equipmentName);
+
+  if (log.type === "stairmaster") {
+    if (equipment) $("#weight-equipment").value = String(equipment.id);
+    await updateWeightFormMode();
+    $("#stairmaster-level").value = log.level;
+    $("#stairmaster-minutes").value = Math.floor(log.duration / 60);
+    $("#stairmaster-seconds").value = log.duration % 60;
+    updateStairmasterCaloriePreview();
+    setEditModeIndicator(`✏️ 수정 중 — ${STAIRMASTER_NAME}`);
+    return;
+  }
+
+  if (equipment) $("#weight-equipment").value = String(equipment.id);
+  resetPreviousRecordInfo();
+  $("#stairmaster-section").hidden = true;
+  $("#weight-set-section").hidden = false;
+  currentSets = log.sets.map((s) => ({ ...s }));
+  exitSetEditMode();
+  $("#set-entry").hidden = true;
+  renderSetList();
+  updateEquipmentLock();
+  setEditModeIndicator(`✏️ 수정 중 — ${log.equipmentName}`);
+}
+
 function closeAddWorkoutModal() {
   modalAddWorkout.hidden = true;
   resetSetEntryState();
@@ -1183,6 +1313,10 @@ function closeAddWorkoutModal() {
   $("#running-pace-preview").textContent = "-";
   resetStairmasterState();
   resetPreviousRecordInfo();
+  editingLogId = null;
+  editingLogSnapshot = null;
+  setEditModeIndicator(null);
+  setWorkoutTypeToggle("weight");
 }
 
 $("#btn-cancel-weight").addEventListener("click", closeAddWorkoutModal);
@@ -1190,11 +1324,8 @@ $("#btn-cancel-running").addEventListener("click", closeAddWorkoutModal);
 
 $$(".segmented-btn", $("#workout-type-toggle")).forEach((btn) => {
   btn.addEventListener("click", () => {
-    $$(".segmented-btn", $("#workout-type-toggle")).forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    const type = btn.dataset.type;
-    $("#form-weight").hidden = type !== "weight";
-    $("#form-running").hidden = type !== "running";
+    if (editingLogId != null) return;
+    setWorkoutTypeToggle(btn.dataset.type);
   });
 });
 
@@ -1259,6 +1390,18 @@ $("#btn-finish-weight").addEventListener("click", async () => {
     const met = getStairmasterMET(level);
     const calories = Math.round(met * stairmasterBodyWeightKg * (duration / 3600));
 
+    if (editingLogId != null) {
+      const updated = { ...editingLogSnapshot, type: "stairmaster", level, duration, calories };
+      await db.updateWorkoutLog(editingLogId, updated);
+      closeAddWorkoutModal();
+      const logs = await db.getWorkoutLogsByDate(todayStr());
+      await renderWorkoutLogList(logs);
+      renderHomeWorkoutSummary(logs);
+      await checkForNewBadges();
+      showToast("운동 기록이 수정되었어요");
+      return;
+    }
+
     const log = {
       date: todayStr(),
       type: "stairmaster",
@@ -1273,12 +1416,32 @@ $("#btn-finish-weight").addEventListener("click", async () => {
     const logs = await db.getWorkoutLogsByDate(todayStr());
     await renderWorkoutLogList(logs);
     renderHomeWorkoutSummary(logs);
+    await checkForNewBadges();
     showToast("천국의계단 운동이 기록되었어요");
     return;
   }
 
   if (!currentSets.length) {
     showToast("세트를 먼저 기록해주세요.");
+    return;
+  }
+
+  if (editingLogId != null) {
+    const updated = {
+      ...editingLogSnapshot,
+      type: "weight",
+      equipmentId: equipment.id,
+      equipmentName: equipment.name,
+      category: equipment.category,
+      sets: currentSets.map((s) => ({ ...s })),
+    };
+    await db.updateWorkoutLog(editingLogId, updated);
+    closeAddWorkoutModal();
+    const logs = await db.getWorkoutLogsByDate(todayStr());
+    await renderWorkoutLogList(logs);
+    renderHomeWorkoutSummary(logs);
+    await checkForNewBadges();
+    showToast("운동 기록이 수정되었어요");
     return;
   }
 
@@ -1297,6 +1460,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
   const logs = await db.getWorkoutLogsByDate(todayStr());
   await renderWorkoutLogList(logs);
   renderHomeWorkoutSummary(logs);
+  await checkForNewBadges();
   showToast("운동이 기록되었어요");
 });
 
@@ -1323,6 +1487,18 @@ $("#form-running").addEventListener("submit", async (e) => {
   }
   const pace = Number((duration / distance).toFixed(2));
 
+  if (editingLogId != null) {
+    const updated = { ...editingLogSnapshot, type: "running", distance, duration, pace };
+    await db.updateWorkoutLog(editingLogId, updated);
+    closeAddWorkoutModal();
+    const logs = await db.getWorkoutLogsByDate(todayStr());
+    await renderWorkoutLogList(logs);
+    renderHomeWorkoutSummary(logs);
+    await checkForNewBadges();
+    showToast("운동 기록이 수정되었어요");
+    return;
+  }
+
   const log = {
     date: todayStr(),
     type: "running",
@@ -1337,6 +1513,7 @@ $("#form-running").addEventListener("submit", async (e) => {
   const logs = await db.getWorkoutLogsByDate(todayStr());
   await renderWorkoutLogList(logs);
   renderHomeWorkoutSummary(logs);
+  await checkForNewBadges();
   showToast("러닝이 기록되었어요");
 });
 
@@ -1434,6 +1611,7 @@ $("#inbody-form").addEventListener("submit", async (e) => {
   $("#inbody-form").reset();
   closeInbodyForm();
   await renderInbodyTab();
+  await checkForNewBadges();
   showToast("인바디 기록이 추가되었어요");
 });
 
@@ -2217,6 +2395,7 @@ async function init() {
   await db.deleteSetting("defaultRestSeconds");
 
   switchTab(getLastTab());
+  await checkForNewBadges();
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});

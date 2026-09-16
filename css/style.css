@@ -347,6 +347,11 @@ body {
   margin: 0 0 8px;
 }
 .stats-block select { margin-bottom: 10px; }
+.stats-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: -4px 0 4px;
+}
 
 /* Charts */
 canvas {
@@ -1244,4 +1249,89 @@ input[type="range"] {
   background: var(--mint);
   border-color: var(--mint);
   color: #08251a;
+}
+
+/* Category max-weight chart legend */
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.chart-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex: none;
+}
+
+/* Equipment log detail popup (stats chart data-point click) */
+.log-table-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+.log-table-detail-totals {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+/* Centered popup modal (vs. the default bottom sheet) */
+.modal-overlay-center {
+  align-items: center;
+  padding: 20px;
+}
+.modal-overlay-center .modal-sheet {
+  border-radius: 20px;
+  max-width: 340px;
+}
+
+/* New badge earned popup */
+.badge-earned-sheet {
+  align-items: center;
+  text-align: center;
+}
+.badge-earned-header {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 4px 0 0;
+}
+.badge-earned-icon {
+  width: 100px;
+  height: 100px;
+  margin: 4px auto 0;
+}
+.badge-earned-icon .badge-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.badge-earned-name {
+  font-size: 19px;
+  font-weight: 700;
+  margin: 2px 0 0;
+}
+.badge-earned-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0;
+}
+.badge-earned-date {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0 0 4px;
 }

@@ -158,3 +158,145 @@ export function drawLineChart(canvas, labels, values, options = {}) {
     });
   }
 }
+
+/**
+ * Draws a multi-series line chart sharing one x-axis of date labels.
+ * Each series can have gaps (gets a broken line, not interpolated).
+ * After drawing, canvas.__chartPoints holds every plotted point's pixel
+ * position plus its source data, for click hit-testing (see attachChartClickHandler).
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {string[]} dateLabels - shared x-axis labels, index-addressed by each point
+ * @param {{name: string, color: string, points: {index: number, value: number, date: string, logId?: number}[]}[]} series
+ * @param {{unit?: string}} [options]
+ */
+export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
+  const { ctx, width, height } = setupCanvasForDPR(canvas);
+
+  ctx.clearRect(0, 0, width, height);
+  canvas.__chartPoints = [];
+
+  const allValues = series.flatMap((s) => s.points.map((p) => p.value));
+  if (!dateLabels.length || !allValues.length) {
+    ctx.fillStyle = TEXT_DIM;
+    ctx.font = "13px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText("데이터가 없어요", width / 2, height / 2);
+    return;
+  }
+
+  const padding = { top: 28, right: 16, bottom: 22, left: 44 };
+  const plotW = width - padding.left - padding.right;
+  const plotH = height - padding.top - padding.bottom;
+
+  const autoRange = computeAutoYRange(allValues);
+  const min = autoRange.min;
+  const max = autoRange.max;
+  const range = max - min || 1;
+  const yFor = (v) => padding.top + plotH - ((v - min) / range) * plotH;
+  const n = dateLabels.length;
+  const xFor = (i) => padding.left + (n <= 1 ? 0.5 : i / (n - 1)) * plotW;
+
+  // grid lines
+  ctx.strokeStyle = GRID;
+  ctx.lineWidth = 1;
+  const tickCount = 5;
+  for (let i = 0; i < tickCount; i++) {
+    const y = padding.top + (plotH / (tickCount - 1)) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(width - padding.right, y);
+    ctx.stroke();
+  }
+
+  // y-axis value labels
+  ctx.fillStyle = TEXT_DIM;
+  ctx.font = "11px system-ui";
+  ctx.textAlign = "right";
+  for (let i = 0; i < tickCount; i++) {
+    const y = padding.top + (plotH / (tickCount - 1)) * i;
+    const tickValue = max - ((max - min) / (tickCount - 1)) * i;
+    const rounded = Math.round(tickValue * 10) / 10;
+    ctx.fillText(`${rounded}`, padding.left - 8, y + 4);
+  }
+
+  const hitPoints = [];
+
+  series.forEach((s) => {
+    if (!s.points.length) return;
+    const sorted = s.points.slice().sort((a, b) => a.index - b.index);
+
+    ctx.beginPath();
+    let started = false;
+    sorted.forEach((p) => {
+      const x = xFor(p.index);
+      const y = yFor(p.value);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+
+    sorted.forEach((p) => {
+      const x = xFor(p.index);
+      const y = yFor(p.value);
+      ctx.beginPath();
+      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = s.color;
+      ctx.fill();
+      hitPoints.push({ x, y, seriesName: s.name, value: p.value, date: p.date, logId: p.logId });
+    });
+  });
+
+  canvas.__chartPoints = hitPoints;
+
+  // date labels along shared x-axis, thinned to at most 6
+  const maxLabels = 6;
+  const step = Math.max(1, Math.ceil((n - 1) / (maxLabels - 1)) || 1);
+  const isShownIndex = (i) => i === 0 || i === n - 1 || i % step === 0;
+
+  ctx.fillStyle = TEXT_DIM;
+  ctx.font = "13px system-ui";
+  ctx.textAlign = "center";
+  const labelY = padding.top + plotH + 16;
+  dateLabels.forEach((label, i) => {
+    if (!isShownIndex(i)) return;
+    ctx.fillText(label, xFor(i), labelY);
+  });
+}
+
+/**
+ * Attaches a click handler (once per canvas) that hit-tests the nearest
+ * plotted point stored by drawMultiLineChart/drawLineChart-family functions
+ * in canvas.__chartPoints, and invokes onPointClick(point) when the click
+ * lands within a small pixel radius of one.
+ */
+export function attachChartClickHandler(canvas, onPointClick) {
+  if (canvas.__chartClickAttached) return;
+  canvas.__chartClickAttached = true;
+  canvas.addEventListener("click", (e) => {
+    const points = canvas.__chartPoints || [];
+    if (!points.length) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    let closest = null;
+    let closestDist = Infinity;
+    points.forEach((p) => {
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < closestDist) {
+        closestDist = d;
+        closest = p;
+      }
+    });
+    if (closest && closestDist <= 16) {
+      onPointClick(closest);
+    }
+  });
+}
