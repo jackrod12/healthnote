@@ -408,6 +408,18 @@ canvas {
   border-color: var(--mint);
   color: #08251a;
 }
+.pill:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Equipment picker row above each single-equipment stat chart */
+.equipment-pill-row {
+  margin-bottom: 4px;
+}
+.equipment-pill-row:empty {
+  display: none;
+}
 
 /* Inputs */
 input, select {
@@ -1266,27 +1278,6 @@ input[type="range"] {
   background: var(--mint);
   border-color: var(--mint);
   color: #08251a;
-}
-
-/* Category max-weight chart legend */
-.chart-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-bottom: 8px;
-}
-.chart-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--text-dim);
-}
-.chart-legend-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  flex: none;
 }
 
 /* Equipment log detail popup (stats chart data-point click) */

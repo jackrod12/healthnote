@@ -1,5 +1,5 @@
 import * as db from "./db.js";
-import { drawLineChart, drawMultiLineChart, attachChartClickHandler, CHART_LINE_COLORS } from "./chart.js";
+import { drawLineChart, drawMultiLineChart, attachChartClickHandler } from "./chart.js";
 import { evaluateAllBadges, renderBadgeIconSvg, formatProgressText, BADGE_CATEGORIES } from "./badges.js";
 
 /* ---------------- helpers ---------------- */
@@ -532,7 +532,7 @@ function toKg(set) {
   return set.unit === "lb" ? set.weight * LB_TO_KG : set.weight;
 }
 
-/* ---------------- workout tab: per-category multi-line max-weight charts ---------------- */
+/* ---------------- workout tab: per-category single-equipment charts ---------------- */
 
 const STAT_CATEGORIES = ["가슴", "등", "하체", "어깨", "팔", "복근"];
 const CATEGORY_CHART_SUFFIX = { 가슴: "chest", 등: "back", 하체: "legs", 어깨: "shoulder", 팔: "arms", 복근: "abs" };
@@ -561,93 +561,67 @@ function logMatchesEquipment(log, eq, equipmentIds) {
   return normalizeEquipmentName(log.equipmentName) === normalizeEquipmentName(eq.name);
 }
 
-/* builds per-equipment max-weight-per-log point series for one category, sharing
-   one x-axis of the category's most recent 20 distinct dates */
-function buildCategorySeries(allLogs, equipmentInCategory, equipmentList) {
-  const equipmentIds = new Set(equipmentList.map((eq) => eq.id));
-  const perEquip = equipmentInCategory
-    .map((eq, i) => {
-      const rawPoints = allLogs
-        .filter((l) => l.type === "weight" && logMatchesEquipment(l, eq, equipmentIds))
-        .map((log) => {
-          const weightsKg = log.sets.filter((s) => s.unit !== "none").map(toKg);
-          if (!weightsKg.length) return null;
-          return { date: log.date, maxWeight: Math.max(...weightsKg), logId: log.id };
-        })
-        .filter(Boolean);
-
-      // multiple logs of the same equipment on the same day (e.g. two
-      // separate sessions) must collapse into a single point — otherwise
-      // the chart plots several y-values at the same x-index and zigzags
-      const byDate = new Map();
-      rawPoints.forEach((p) => {
-        const existing = byDate.get(p.date);
-        if (!existing || p.maxWeight > existing.maxWeight) byDate.set(p.date, p);
-      });
-      const points = [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
-
-      return { name: eq.name, color: CHART_LINE_COLORS[i % CHART_LINE_COLORS.length], points };
+/* builds one equipment's own max-weight-per-date series (deduping same-day
+   logs to that day's highest weight), capped to its most recent 20 dates.
+   Each equipment now gets its own independent x-axis — since only one
+   equipment is charted at a time (see the pill row below), there's no more
+   shared category-wide date window for a rarely-logged equipment to get
+   squeezed out of. */
+function buildEquipmentPoints(allLogs, eq, equipmentIds) {
+  const rawPoints = allLogs
+    .filter((l) => l.type === "weight" && logMatchesEquipment(l, eq, equipmentIds))
+    .map((log) => {
+      const weightsKg = log.sets.filter((s) => s.unit !== "none").map(toKg);
+      if (!weightsKg.length) return null;
+      return { date: log.date, maxWeight: Math.max(...weightsKg), logId: log.id };
     })
-    .filter((e) => e.points.length);
+    .filter(Boolean);
 
-  if (!perEquip.length) return { dateLabels: [], series: [] };
-
-  const allDates = new Set();
-  perEquip.forEach((e) => e.points.forEach((p) => allDates.add(p.date)));
-  const recentDatesSet = new Set([...allDates].sort().slice(-20));
-
-  // an equipment logged less often than the rest of its category can end up
-  // with every one of its dates older than the shared "most recent 20"
-  // window above — which would drop it from the series filter below and
-  // make it vanish from the chart entirely despite having real data.
-  // Force its single latest point into the window so it always shows.
-  perEquip.forEach((e) => {
-    if (!e.points.length) return;
-    const hasVisiblePoint = e.points.some((p) => recentDatesSet.has(p.date));
-    if (!hasVisiblePoint) recentDatesSet.add(e.points[e.points.length - 1].date);
+  const byDate = new Map();
+  rawPoints.forEach((p) => {
+    const existing = byDate.get(p.date);
+    if (!existing || p.maxWeight > existing.maxWeight) byDate.set(p.date, p);
   });
-
-  const recentDates = [...recentDatesSet].sort();
-  const dateIndex = new Map(recentDates.map((d, i) => [d, i]));
-
-  const series = perEquip
-    .map((e) => ({
-      name: e.name,
-      color: e.color,
-      points: e.points
-        .filter((p) => dateIndex.has(p.date))
-        .map((p) => ({ index: dateIndex.get(p.date), value: Math.round(p.maxWeight * 10) / 10, date: p.date, logId: p.logId })),
-    }))
-    .filter((s) => s.points.length);
-
-  return { dateLabels: recentDates.map((d) => d.slice(5)), series };
+  return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-20);
 }
 
-function renderChartLegend(el, series) {
-  el.innerHTML = series
-    .map(
-      (s) => `<span class="chart-legend-item"><span class="chart-legend-dot" style="background:${s.color}"></span>${s.name}</span>`
-    )
-    .join("");
+/* per-category selected equipment id, remembered across re-renders (e.g.
+   revisiting the workout tab) until the user picks a different one */
+const selectedEquipmentByCategory = new Map();
+
+function renderSingleEquipmentChart(canvas, eq, points) {
+  const dateLabels = points.map((p) => p.date.slice(5));
+  const series = [
+    {
+      name: eq.name,
+      color: "#00e5a0",
+      points: points.map((p, i) => ({ index: i, value: Math.round(p.maxWeight * 10) / 10, date: p.date, logId: p.logId })),
+    },
+  ];
+  drawMultiLineChart(canvas, dateLabels, series, { unit: "kg" });
+  attachChartClickHandler(canvas, (point) => {
+    if (point.logId != null) openEquipmentLogDetail(point.logId);
+  });
 }
 
 const STAT_CHART_DEBUG_CATEGORIES = new Set(["가슴", "등", "하체"]);
 
 async function renderCategoryCharts(allLogs, equipmentList) {
+  const equipmentIds = new Set(equipmentList.map((eq) => eq.id));
+
   for (const cat of STAT_CATEGORIES) {
     const suffix = CATEGORY_CHART_SUFFIX[cat];
     const canvas = $(`#chart-cat-${suffix}`);
-    const legendEl = $(`#legend-cat-${suffix}`);
+    const pillRowEl = $(`#equipment-pills-${suffix}`);
     const emptyEl = $(`#empty-cat-${suffix}`);
     // normalized (trimmed + lowercased) comparison guards against a category
     // value that's otherwise "가슴" but carries stray whitespace or mixed
     // casing (e.g. from a manual DB edit or import), which would otherwise
     // silently drop the equipment out of every category tab
     const equipmentInCategory = equipmentList.filter((eq) => normalizeCategory(eq.category) === normalizeCategory(cat));
-    const { dateLabels, series } = buildCategorySeries(allLogs, equipmentInCategory, equipmentList);
+    const pointsByEquipmentId = new Map(equipmentInCategory.map((eq) => [eq.id, buildEquipmentPoints(allLogs, eq, equipmentIds)]));
 
     if (STAT_CHART_DEBUG_CATEGORIES.has(cat)) {
-      const equipmentIds = new Set(equipmentList.map((eq) => eq.id));
       console.log(
         `[운동통계 디버그] "${cat}" category === 인 기구 전체 목록:`,
         equipmentInCategory.map((eq) => ({ id: eq.id, name: eq.name, category: eq.category }))
@@ -668,22 +642,41 @@ async function renderCategoryCharts(allLogs, equipmentList) {
         )
       );
       console.log(
-        `[운동통계 디버그] "${cat}" 차트에 실제로 그려지는 기구별 데이터 포인트 수:`,
-        series.map((s) => ({ name: s.name, points: s.points.length }))
+        `[운동통계 디버그] "${cat}" 기구별 데이터 포인트 수:`,
+        equipmentInCategory.map((eq) => ({ name: eq.name, points: (pointsByEquipmentId.get(eq.id) || []).length }))
       );
     }
 
-    const hasData = series.length > 0;
-    canvas.hidden = !hasData;
-    legendEl.hidden = !hasData;
-    emptyEl.hidden = hasData;
-    if (!hasData) continue;
+    const hasAnyData = equipmentInCategory.some((eq) => (pointsByEquipmentId.get(eq.id) || []).length > 0);
+    canvas.hidden = !hasAnyData;
+    pillRowEl.hidden = !hasAnyData;
+    emptyEl.hidden = hasAnyData;
+    if (!hasAnyData) continue;
 
-    renderChartLegend(legendEl, series);
-    drawMultiLineChart(canvas, dateLabels, series, { unit: "kg" });
-    attachChartClickHandler(canvas, (point) => {
-      if (point.logId != null) openEquipmentLogDetail(point.logId);
-    });
+    const selectEquipment = (eqId) => {
+      selectedEquipmentByCategory.set(cat, eqId);
+      pillRowEl.innerHTML = equipmentInCategory
+        .map((eq) => {
+          const eqHasData = (pointsByEquipmentId.get(eq.id) || []).length > 0;
+          const active = eq.id === eqId ? " active" : "";
+          return `<button type="button" class="pill${active}" data-eq-id="${eq.id}" ${eqHasData ? "" : "disabled"}>${eq.name}</button>`;
+        })
+        .join("");
+      $$(".pill", pillRowEl).forEach((btn) => {
+        btn.addEventListener("click", () => selectEquipment(Number(btn.dataset.eqId)));
+      });
+
+      const eq = equipmentInCategory.find((e) => e.id === eqId);
+      renderSingleEquipmentChart(canvas, eq, pointsByEquipmentId.get(eqId) || []);
+    };
+
+    let selectedId = selectedEquipmentByCategory.get(cat);
+    const selectedHasData = selectedId != null && (pointsByEquipmentId.get(selectedId) || []).length > 0;
+    if (!selectedHasData) {
+      selectedId = equipmentInCategory.find((eq) => (pointsByEquipmentId.get(eq.id) || []).length > 0).id;
+    }
+
+    selectEquipment(selectedId);
   }
 }
 
@@ -1784,31 +1777,18 @@ const INBODY_METRICS = ["weight", "muscleMass", "bodyFatMass", "bmi", "bodyFat"]
 
 let inbodyRecordsCache = [];
 
-/* min: floor(dataMin - margin), max: ceil(dataMax + margin), margin = max(range*0.2, 2);
-   a single point instead gets a flat ±5 (which the margin formula also produces when
-   range is 0, so this only special-cases the truly single-record case) */
-function computeInbodyYRange(values) {
-  const dataMin = Math.min(...values);
-  const dataMax = Math.max(...values);
-  if (values.length === 1) {
-    return { min: Math.floor(dataMin - 5), max: Math.ceil(dataMax + 5) };
-  }
-  const range = dataMax - dataMin;
-  const margin = Math.max(range * 0.2, 2);
-  return { min: Math.floor(dataMin - margin), max: Math.ceil(dataMax + margin) };
-}
-
 async function renderInbodyChart() {
   INBODY_METRICS.forEach((metric) => {
     const withMetric = inbodyRecordsCache.filter((r) => r[metric] !== null && r[metric] !== undefined);
     const recent = withMetric.slice(-10);
     const values = recent.map((r) => r[metric]);
-    const yRange = values.length ? computeInbodyYRange(values) : {};
+    // y-axis grid/labels use the shared nice-step rule (see chart.js
+    // computeNiceYRange) — drawLineChart computes it internally
     drawLineChart(
       $(`#chart-inbody-${metric}`),
       recent.map((r) => r.date.slice(5)),
       values,
-      { color: "#00e5a0", unit: INBODY_METRIC_UNITS[metric], yAxisLabels: true, yMin: yRange.min, yMax: yRange.max }
+      { color: "#00e5a0", unit: INBODY_METRIC_UNITS[metric] }
     );
   });
 }
