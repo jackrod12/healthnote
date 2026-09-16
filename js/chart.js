@@ -190,6 +190,7 @@ export function drawLineChart(canvas, labels, values, options = {}) {
  * @param {{unit?: string}} [options]
  */
 export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
+  const unit = options.unit || "";
   const { ctx, width, height } = setupCanvasForDPR(canvas);
 
   ctx.clearRect(0, 0, width, height);
@@ -241,14 +242,34 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
 
   const hitPoints = [];
 
-  series.forEach((s) => {
-    if (!s.points.length) return;
-    const sorted = s.points.slice().sort((a, b) => a.index - b.index);
+  // when several series hit the exact same date+value, their points and
+  // labels would sit on top of each other — nudge each member of such a
+  // cluster sideways (…,-4,0,+4,…) so every one stays individually visible.
+  // Each series keeps its own data; only the drawn x position is offset.
+  const seriesSorted = series.map((s) => s.points.slice().sort((a, b) => a.index - b.index));
+  const clusters = new Map();
+  seriesSorted.forEach((points) => {
+    points.forEach((p) => {
+      const key = `${p.index}|${p.value}`;
+      if (!clusters.has(key)) clusters.set(key, []);
+      clusters.get(key).push(p);
+    });
+  });
+  clusters.forEach((points) => {
+    const n = points.length;
+    points.forEach((p, i) => {
+      p._xOffset = (i - (n - 1) / 2) * 4;
+    });
+  });
+
+  series.forEach((s, si) => {
+    const sorted = seriesSorted[si];
+    if (!sorted.length) return;
 
     ctx.beginPath();
     let started = false;
     sorted.forEach((p) => {
-      const x = xFor(p.index);
+      const x = xFor(p.index) + (p._xOffset || 0);
       const y = yFor(p.value);
       if (!started) {
         ctx.moveTo(x, y);
@@ -263,7 +284,7 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
     ctx.stroke();
 
     sorted.forEach((p) => {
-      const x = xFor(p.index);
+      const x = xFor(p.index) + (p._xOffset || 0);
       const y = yFor(p.value);
       ctx.beginPath();
       ctx.arc(x, y, 3.5, 0, Math.PI * 2);
@@ -274,6 +295,24 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
   });
 
   canvas.__chartPoints = hitPoints;
+
+  // per-point value labels ("60kg") at the point's upper-right, 9px, colored
+  // to match the series line; a label within 20px of an already-shown one
+  // is skipped instead of overlapping it
+  const shownLabelPoints = [];
+  ctx.font = "9px system-ui";
+  ctx.textAlign = "left";
+  series.forEach((s, si) => {
+    seriesSorted[si].forEach((p) => {
+      const x = xFor(p.index) + (p._xOffset || 0);
+      const y = yFor(p.value);
+      const tooClose = shownLabelPoints.some((sp) => Math.hypot(sp.x - x, sp.y - y) <= 20);
+      if (tooClose) return;
+      shownLabelPoints.push({ x, y });
+      ctx.fillStyle = s.color;
+      ctx.fillText(`${p.value}${unit}`, x + 6, y - 6);
+    });
+  });
 
   // date labels along shared x-axis, thinned to at most 6
   const maxLabels = 6;

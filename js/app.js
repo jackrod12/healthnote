@@ -308,13 +308,13 @@ function renderMonthActivityStats(monthLogs, monthDrinkLogs) {
   const runningCount = new Set(
     monthLogs.filter((l) => l.type === "running" || l.type === "stairmaster").map((l) => l.date)
   ).size;
-  const drinkCount = monthDrinkLogs.filter((d) => d.type === "drink" || d.type === "light").length;
+  const nodrinkCount = monthDrinkLogs.filter((d) => d.type === "nodrink").length;
   const proteinCount = monthDrinkLogs.filter((d) => d.type === "protein").length;
 
   $("#month-activity-stats").innerHTML = `
     <div class="activity-stat-item"><span>💪 웨이트 운동</span><span>${weightCount}회</span></div>
     <div class="activity-stat-item"><span>🏃 유산소 운동</span><span>${runningCount}회</span></div>
-    <div class="activity-stat-item"><span>🍺 음주 (반주 포함)</span><span>${drinkCount}회</span></div>
+    <div class="activity-stat-item"><span>💧 금주</span><span class="activity-stat-value-nodrink">${nodrinkCount}회</span></div>
     <div class="activity-stat-item"><span>🥤 프로틴 섭취</span><span>${proteinCount}회</span></div>
   `;
 }
@@ -343,7 +343,7 @@ async function renderCalendar() {
   const dayInfoFor = (date) => {
     let info = dayInfo.get(date);
     if (!info) {
-      info = { weight: false, running: false, drink: null, protein: false };
+      info = { weight: false, running: false, nodrink: false, protein: false };
       dayInfo.set(date, info);
     }
     return info;
@@ -355,7 +355,7 @@ async function renderCalendar() {
   });
   monthDrinkLogs.forEach((d) => {
     const info = dayInfoFor(d.date);
-    if (d.type === "drink" || d.type === "light") info.drink = d.type;
+    if (d.type === "nodrink") info.nodrink = true;
     if (d.type === "protein") info.protein = true;
   });
 
@@ -381,8 +381,7 @@ async function renderCalendar() {
     if (info) {
       if (info.weight) dots += '<span class="calendar-dot dot-weight"></span>';
       if (info.running) dots += '<span class="calendar-dot dot-running"></span>';
-      if (info.drink === "drink") dots += '<span class="calendar-dot dot-drink"></span>';
-      if (info.drink === "light") dots += '<span class="calendar-dot dot-light"></span>';
+      if (info.nodrink) dots += '<span class="calendar-dot dot-nodrink"></span>';
       if (info.protein) dots += '<span class="calendar-dot dot-protein"></span>';
     }
 
@@ -411,8 +410,7 @@ let currentDetailDate = null;
 
 function updateDrinkToggleButtons(records) {
   const types = new Set(records.map((r) => r.type));
-  $("#btn-toggle-drink").classList.toggle("active", types.has("drink"));
-  $("#btn-toggle-light").classList.toggle("active", types.has("light"));
+  $("#btn-toggle-nodrink").classList.toggle("active", types.has("nodrink"));
   $("#btn-toggle-protein").classList.toggle("active", types.has("protein"));
 }
 
@@ -474,18 +472,13 @@ async function toggleDrinkType(type) {
   if (existing) {
     await db.deleteDrinkLogById(existing.id);
   } else {
-    if (type === "drink" || type === "light") {
-      const conflicting = records.find((r) => r.type === "drink" || r.type === "light");
-      if (conflicting) await db.deleteDrinkLogById(conflicting.id);
-    }
     await db.addDrinkLog(currentDetailDate, type);
   }
   updateDrinkToggleButtons(await db.getDrinkLogsByDate(currentDetailDate));
   await renderCalendar();
 }
 
-$("#btn-toggle-drink").addEventListener("click", () => toggleDrinkType("drink"));
-$("#btn-toggle-light").addEventListener("click", () => toggleDrinkType("light"));
+$("#btn-toggle-nodrink").addEventListener("click", () => toggleDrinkType("nodrink"));
 $("#btn-toggle-protein").addEventListener("click", () => toggleDrinkType("protein"));
 
 $("#btn-prev-month").addEventListener("click", () => {

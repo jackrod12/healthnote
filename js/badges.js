@@ -469,26 +469,6 @@ function computeInbodyExtremeDeltaPoints(sorted, field, direction) {
   }
   return points;
 }
-function computeAbstinenceStreakPoints(drinkDatesSorted, earliestDate, todayStr) {
-  if (!earliestDate) return [];
-  const points = [];
-  let cursor = earliestDate;
-  const boundaries = [...drinkDatesSorted, addDaysStr(todayStr, 1)];
-  for (const drinkDate of boundaries) {
-    let soberCount = 0;
-    let d = cursor;
-    // guard against pathological loops
-    let safety = 0;
-    while (d < drinkDate && safety < 20000) {
-      soberCount += 1;
-      points.push({ date: d, value: soberCount });
-      d = addDaysStr(d, 1);
-      safety += 1;
-    }
-    cursor = addDaysStr(drinkDate, 1);
-  }
-  return points;
-}
 function computeDailyTotals(logsSorted, valueFn) {
   const order = [];
   const map = new Map();
@@ -591,18 +571,12 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals
   const allWorkoutDatesSorted = [...new Set(workoutLogs.map((l) => l.date))].sort();
   const inbodySorted = inbodyRecords.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const proteinDatesSorted = [...new Set(drinkLogs.filter((d) => d.type === "protein").map((d) => d.date))].sort();
-  const drinkDatesSorted = [...new Set(drinkLogs.filter((d) => d.type === "drink" || d.type === "light").map((d) => d.date))].sort();
+  const nodrinkDatesSorted = [...new Set(drinkLogs.filter((d) => d.type === "nodrink").map((d) => d.date))].sort();
   const workoutDateSet = new Set(allWorkoutDatesSorted);
 
   const bodyWeightKg = inbodySorted.length ? inbodySorted[inbodySorted.length - 1].weight ?? DEFAULT_BODY_WEIGHT_KG : DEFAULT_BODY_WEIGHT_KG;
 
   const todayStr = formatDateObj(new Date());
-  const allDates = [
-    ...workoutLogs.map((l) => l.date),
-    ...inbodyRecords.map((r) => r.date),
-    ...drinkLogs.map((d) => d.date),
-  ];
-  const earliestDate = allDates.length ? allDates.reduce((min, d) => (d < min ? d : min)) : null;
 
   /* ---- 신규 50개용 계산 ---- */
   const logsWithTime = workoutLogs.filter((l) => l.createdAt).slice().sort((a, b) => a.createdAt - b.createdAt);
@@ -865,7 +839,7 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals
 
     proteinStreak: computeStreakAchievements(proteinDatesSorted),
     proteinDatesSorted,
-    noDrinkStreak: computeAbstinenceStreakPoints(drinkDatesSorted, earliestDate, todayStr),
+    noDrinkStreak: computeStreakAchievements(nodrinkDatesSorted),
     workoutAndProteinSameDayDates: proteinDatesSorted.filter((d) => workoutDateSet.has(d)).sort(),
 
     cumulativeVolume: computeCumulativePoints(weightLogs, (l) => calcLogVolume(l)),
