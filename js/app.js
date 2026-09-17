@@ -1310,8 +1310,27 @@ $("#btn-cancel-load-routine").addEventListener("click", () => {
 /* add workout modal */
 const modalAddWorkout = $("#modal-add-workout");
 
+/* the date picker never allows a future date — max is refreshed every time
+   the modal opens/edits, not just once, in case the app stays open past midnight */
+function resetWorkoutDateInput(date) {
+  const today = todayStr();
+  $("#workout-date-input").max = today;
+  $("#workout-date-input").value = date || today;
+}
+
+/* defense-in-depth against a future date sneaking in some other way (typed
+   directly into the field) even though the native picker already blocks it
+   via max= */
+function getSelectedWorkoutDate() {
+  const value = $("#workout-date-input").value;
+  const today = todayStr();
+  if (!value) return today;
+  return value > today ? today : value;
+}
+
 $("#btn-add-workout").addEventListener("click", () => {
   modalAddWorkout.hidden = false;
+  resetWorkoutDateInput();
   updateWeightFormMode();
 });
 
@@ -1535,6 +1554,7 @@ async function startEditWorkoutLog(log) {
   editingLogId = log.id;
   editingLogSnapshot = log;
   modalAddWorkout.hidden = false;
+  resetWorkoutDateInput(log.date);
 
   if (log.type === "running") {
     setWorkoutTypeToggle("running");
@@ -1585,6 +1605,7 @@ function closeAddWorkoutModal() {
   resetStairmasterState();
   resetPreviousRecordInfo();
   resetFitnessImportState();
+  resetWorkoutDateInput();
   editingLogId = null;
   editingLogSnapshot = null;
   setEditModeIndicator(null);
@@ -1643,6 +1664,7 @@ $("#btn-record-set").addEventListener("click", () => {
 });
 
 $("#btn-finish-weight").addEventListener("click", async () => {
+  const date = getSelectedWorkoutDate();
   const equipmentId = Number($("#weight-equipment").value);
   const equipment = equipmentCache.find((eq) => eq.id === equipmentId);
   if (!equipment) {
@@ -1663,7 +1685,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
     const calories = Math.round(met * stairmasterBodyWeightKg * (duration / 3600));
 
     if (editingLogId != null) {
-      const updated = { ...editingLogSnapshot, type: "stairmaster", level, duration, calories };
+      const updated = { ...editingLogSnapshot, type: "stairmaster", date, level, duration, calories };
       await db.updateWorkoutLog(editingLogId, updated);
       closeAddWorkoutModal();
       const logs = await db.getWorkoutLogsByDate(todayStr());
@@ -1675,12 +1697,12 @@ $("#btn-finish-weight").addEventListener("click", async () => {
     }
 
     const log = {
-      date: todayStr(),
+      date,
       type: "stairmaster",
       level,
       duration,
       calories,
-      sortOrder: await getBottomSortOrder(),
+      sortOrder: await getBottomSortOrderForDate(date),
       createdAt: Date.now(),
     };
     await db.addWorkoutLog(log);
@@ -1689,7 +1711,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
     await renderWorkoutLogList(logs);
     renderHomeWorkoutSummary(logs);
     await checkForNewBadges();
-    showToast("천국의계단 운동이 기록되었어요");
+    showToast(date === todayStr() ? "천국의계단 운동이 기록되었어요" : `천국의계단 운동이 ${date}로 기록되었어요`);
     return;
   }
 
@@ -1702,6 +1724,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
     const updated = {
       ...editingLogSnapshot,
       type: "weight",
+      date,
       equipmentId: equipment.id,
       equipmentName: equipment.name,
       category: equipment.category,
@@ -1719,14 +1742,14 @@ $("#btn-finish-weight").addEventListener("click", async () => {
   }
 
   const log = {
-    date: todayStr(),
+    date,
     type: "weight",
     equipmentId: equipment.id,
     equipmentName: equipment.name,
     category: equipment.category,
     manufacturer: equipment.manufacturer || "",
     sets: currentSets.map((s) => ({ ...s })),
-    sortOrder: await getBottomSortOrder(),
+    sortOrder: await getBottomSortOrderForDate(date),
     createdAt: Date.now(),
   };
   await db.addWorkoutLog(log);
@@ -1735,7 +1758,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
   await renderWorkoutLogList(logs);
   renderHomeWorkoutSummary(logs);
   await checkForNewBadges();
-  showToast("운동이 기록되었어요");
+  showToast(date === todayStr() ? "운동이 기록되었어요" : `운동이 ${date}로 기록되었어요`);
 });
 
 $("#running-distance").addEventListener("input", updateRunningPacePreview);
@@ -1942,6 +1965,9 @@ function applyFitnessImportResult(parsed) {
   pendingFitnessImport = parsed;
   pendingRunningComment = null;
 
+  const importedDate = parseParsedDateToIso(parsed.date);
+  if (importedDate) resetWorkoutDateInput(importedDate);
+
   if (parsed.distance_km != null) $("#running-distance").value = parsed.distance_km;
   const minutes = parseDurationToMinutes(parsed.duration ?? parsed.elapsed_time);
   if (minutes != null) $("#running-duration").value = Math.round(minutes * 10) / 10;
@@ -2076,6 +2102,7 @@ async function generateAndSaveRunningComment(logId) {
 
 $("#form-running").addEventListener("submit", async (e) => {
   e.preventDefault();
+  const date = getSelectedWorkoutDate();
   const distance = Number($("#running-distance").value);
   const duration = Number($("#running-duration").value);
   if (!(distance > 0)) {
@@ -2088,7 +2115,7 @@ $("#form-running").addEventListener("submit", async (e) => {
   const commentField = hadComment ? { geminiComment: pendingRunningComment } : {};
 
   if (editingLogId != null) {
-    const updated = { ...editingLogSnapshot, type: "running", distance, duration, pace, ...extraFields, ...commentField };
+    const updated = { ...editingLogSnapshot, type: "running", date, distance, duration, pace, ...extraFields, ...commentField };
     await db.updateWorkoutLog(editingLogId, updated);
     closeAddWorkoutModal();
     const logs = await db.getWorkoutLogsByDate(todayStr());
@@ -2100,8 +2127,6 @@ $("#form-running").addEventListener("submit", async (e) => {
     return;
   }
 
-  const importedDate = parseParsedDateToIso(pendingFitnessImport?.date);
-  const date = importedDate || todayStr();
   const log = {
     date,
     type: "running",
@@ -2120,7 +2145,7 @@ $("#form-running").addEventListener("submit", async (e) => {
   renderHomeWorkoutSummary(logs);
   await checkForNewBadges();
   await renderRunningSection();
-  showToast(importedDate && importedDate !== todayStr() ? `러닝이 ${importedDate}로 기록되었어요` : "러닝이 기록되었어요");
+  showToast(date === todayStr() ? "러닝이 기록되었어요" : `러닝이 ${date}로 기록되었어요`);
   if (!hadComment) {
     generateAndSaveRunningComment(newLogId);
   }
