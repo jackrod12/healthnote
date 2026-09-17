@@ -1343,3 +1343,98 @@ input[type="range"] {
   color: var(--text-dim);
   margin: 0 0 4px;
 }
+
+/* Fitness image import (running modal) */
+.fitness-import-status {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: center;
+}
+.fitness-import-preview {
+  background: var(--card-alt);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.fitness-import-preview strong {
+  color: var(--text);
+}
+
+/* Running stats */
+.running-target-pace-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.running-target-pace-row label {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.running-target-pace-row input {
+  margin: 0;
+}
+.hr-zone-summary {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 8px 0 0;
+}
+.hr-drift-content {
+  font-size: 14px;
+  color: var(--text);
+}
+.hr-drift-content .hr-drift-value {
+  font-weight: 700;
+  font-size: 18px;
+}
+.splits-negative-badge {
+  margin-top: 8px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--mint);
+  background: var(--mint-dim);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+/* Running log list / detail */
+.running-log-comment {
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--card-alt);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-top: 4px;
+}
+.running-detail-section {
+  margin-bottom: 14px;
+}
+.running-detail-section:last-child {
+  margin-bottom: 0;
+}
+.running-detail-section h3 {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+}
+.hr-zone-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.hr-zone-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex: none;
+}

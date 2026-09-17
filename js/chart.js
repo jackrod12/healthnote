@@ -88,7 +88,10 @@ export function computeNiceYRange(values) {
   return { min, max, step };
 }
 
-function drawYAxisGrid(ctx, { padding, plotW, plotH, width, min, max, step }) {
+/* yFor is passed in (rather than recomputed here) so a chart with an
+   inverted axis — e.g. pace, where a smaller number is "better" and drawn
+   higher up — still gets gridlines at the right pixel positions */
+function drawYAxisGrid(ctx, { padding, plotW, width, min, max, step, yFor }) {
   const tickCount = Math.round((max - min) / step) + 1;
 
   ctx.strokeStyle = GRID;
@@ -99,7 +102,7 @@ function drawYAxisGrid(ctx, { padding, plotW, plotH, width, min, max, step }) {
 
   for (let i = 0; i < tickCount; i++) {
     const value = min + step * i;
-    const y = padding.top + plotH - ((value - min) / (max - min || 1)) * plotH;
+    const y = yFor(value);
 
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
@@ -145,7 +148,7 @@ export function drawLineChart(canvas, labels, values, options = {}) {
   const n = values.length;
   const xFor = (i) => xForIndex(i, n, plotW, padding.left);
 
-  drawYAxisGrid(ctx, { padding, plotW, plotH, width, min, max, step });
+  drawYAxisGrid(ctx, { padding, plotW, width, min, max, step, yFor });
 
   // line path
   ctx.beginPath();
@@ -247,7 +250,29 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
   const n = dateLabels.length;
   const xFor = (i) => xForIndex(i, n, plotW, padding.left);
 
-  drawYAxisGrid(ctx, { padding, plotW, plotH, width, min, max, step });
+  drawYAxisGrid(ctx, { padding, plotW, width, min, max, step, yFor });
+
+  // an optional dashed reference line (e.g. an ideal cadence of 180spm) —
+  // drawn before the data series so real data stays visually on top
+  if (options.referenceLine) {
+    const { value, label, color } = options.referenceLine;
+    const y = yFor(value);
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = color || TEXT_DIM;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(width - padding.right, y);
+    ctx.stroke();
+    ctx.restore();
+    if (label) {
+      ctx.fillStyle = color || TEXT_DIM;
+      ctx.font = STAT_CHART_AXIS_FONT;
+      ctx.textAlign = "left";
+      ctx.fillText(label, padding.left + 4, y - 4);
+    }
+  }
 
   const hitPoints = [];
   const seriesSorted = series.map((s) => s.points.slice().sort((a, b) => a.index - b.index));
@@ -336,6 +361,223 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
   dateLabels.forEach((label, i) => {
     if (!isShownIndex(i)) return;
     ctx.fillText(label, xFor(i), labelY);
+  });
+}
+
+/* heart-rate zone 1~5 colors, shared by every chart/summary that breaks a
+   run down by zone */
+export const HR_ZONE_COLORS = {
+  1: "#4dabf7", // blue
+  2: "#26c6da", // teal
+  3: "#66bb6a", // green
+  4: "#ffa726", // orange
+  5: "#ef5350", // red
+};
+
+const PACE_FAST_COLOR = MINT;
+const PACE_SLOW_COLOR = "#ff6b35";
+
+/** "5.5" (minutes, decimal) -> "5'30\"" */
+export function formatPaceLabel(paceMinDecimal) {
+  if (paceMinDecimal == null || !isFinite(paceMinDecimal)) return "-";
+  const totalSeconds = Math.round(paceMinDecimal * 60);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}'${String(s).padStart(2, "0")}"`;
+}
+
+/** "5'30\"" or "5:30" -> 5.5 (decimal minutes); null/unparsable -> null */
+export function parsePaceLabel(text) {
+  if (text == null) return null;
+  const match = String(text).match(/(\d+)['\s:]+(\d+)/);
+  if (!match) return null;
+  const m = Number(match[1]);
+  const s = Number(match[2]);
+  if (!isFinite(m) || !isFinite(s)) return null;
+  return m + s / 60;
+}
+
+/** "12:34" (mm:ss) -> 12.5667 (decimal minutes); null/unparsable -> null */
+export function parseMinutesSeconds(text) {
+  return parsePaceLabel(text);
+}
+
+/** 12.5667 (decimal minutes) -> "12:34" (mm:ss) */
+export function formatMinutesSeconds(decimalMinutes) {
+  if (decimalMinutes == null || !isFinite(decimalMinutes)) return "-";
+  const totalSeconds = Math.round(decimalMinutes * 60);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * Draws the running pace trend: unlike every other chart here, the y-axis
+ * is inverted — a *smaller* pace value (faster) is drawn higher up, since
+ * that's the intuitive "better = up" reading for pace. Each point is
+ * colored mint when it beats the target pace and orange when it doesn't
+ * (or always mint when no target is set); an optional dashed target-pace
+ * line is drawn across the chart.
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {string[]} dateLabels
+ * @param {{index: number, value: number, date: string, logId?: number}[]} points - value is pace in decimal minutes/km
+ * @param {{targetPace?: number|null}} [options]
+ */
+export function drawPaceTrendChart(canvas, dateLabels, points, options = {}) {
+  const targetPace = options.targetPace ?? null;
+  const { ctx, width, height } = setupCanvasForDPR(canvas);
+
+  ctx.clearRect(0, 0, width, height);
+  canvas.__chartPoints = [];
+
+  if (!points.length) {
+    ctx.fillStyle = TEXT_DIM;
+    ctx.font = STAT_CHART_EMPTY_FONT;
+    ctx.textAlign = "center";
+    ctx.fillText("데이터가 없어요", width / 2, height / 2);
+    return;
+  }
+
+  const padding = STAT_CHART_PADDING;
+  const plotW = width - padding.left - padding.right;
+  const plotH = height - padding.top - padding.bottom;
+
+  const values = points.map((p) => p.value).concat(targetPace != null ? [targetPace] : []);
+  const { min, max, step } = computeNiceYRange(values);
+  const range = max - min || 1;
+  // inverted from every other chart: a smaller (faster) pace sits higher up
+  const yFor = (v) => padding.top + ((v - min) / range) * plotH;
+  const n = dateLabels.length;
+  const xFor = (i) => xForIndex(i, n, plotW, padding.left);
+
+  drawYAxisGrid(ctx, { padding, plotW, width, min, max, step, yFor });
+
+  if (targetPace != null) {
+    const y = yFor(targetPace);
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = TEXT_DIM;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(width - padding.right, y);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = TEXT_DIM;
+    ctx.font = STAT_CHART_AXIS_FONT;
+    ctx.textAlign = "left";
+    ctx.fillText(`목표 ${formatPaceLabel(targetPace)}`, padding.left + 4, y - 4);
+  }
+
+  const sorted = points.slice().sort((a, b) => a.index - b.index);
+
+  // connecting line stays a neutral color; the points themselves carry the
+  // fast/slow color coding
+  ctx.beginPath();
+  sorted.forEach((p, i) => {
+    const x = xFor(p.index);
+    const y = yFor(p.value);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = TEXT_DIM;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  const hitPoints = [];
+  ctx.font = STAT_CHART_VALUE_FONT;
+  sorted.forEach((p, pi) => {
+    const x = xFor(p.index);
+    const y = yFor(p.value);
+    const color = targetPace != null ? (p.value <= targetPace ? PACE_FAST_COLOR : PACE_SLOW_COLOR) : PACE_FAST_COLOR;
+
+    ctx.beginPath();
+    ctx.arc(x, y, STAT_CHART_POINT_RADIUS, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    hitPoints.push({ x, y, value: p.value, date: p.date, logId: p.logId });
+
+    const above = pi % 2 === 0;
+    const labelY = above ? y - 6 : y + 14;
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.fillText(formatPaceLabel(p.value), x, labelY);
+  });
+  canvas.__chartPoints = hitPoints;
+
+  const maxLabels = 6;
+  const step2 = Math.max(1, Math.ceil((n - 1) / (maxLabels - 1)) || 1);
+  const isShownIndex = (i) => i === 0 || i === n - 1 || i % step2 === 0;
+  ctx.fillStyle = TEXT_DIM;
+  ctx.font = STAT_CHART_DATE_FONT;
+  ctx.textAlign = "center";
+  const labelY = padding.top + plotH + 16;
+  dateLabels.forEach((label, i) => {
+    if (!isShownIndex(i)) return;
+    ctx.fillText(label, xFor(i), labelY);
+  });
+}
+
+/**
+ * Generic vertical bar chart (heart-rate zone durations, km splits, ...).
+ * Y-axis range: a 0-baseline nice range when options.zeroBaseline is set
+ * (duration-style data, where 0 is meaningful), otherwise the same
+ * data-range-based nice-step rule used everywhere else (amplifies small
+ * differences, e.g. paces that all cluster close together).
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {{label: string, value: number, color?: string, topLabel?: string}[]} bars
+ * @param {{zeroBaseline?: boolean}} [options]
+ */
+export function drawBarChart(canvas, bars, options = {}) {
+  const { ctx, width, height } = setupCanvasForDPR(canvas);
+  ctx.clearRect(0, 0, width, height);
+
+  if (!bars.length) {
+    ctx.fillStyle = TEXT_DIM;
+    ctx.font = STAT_CHART_EMPTY_FONT;
+    ctx.textAlign = "center";
+    ctx.fillText("데이터가 없어요", width / 2, height / 2);
+    return;
+  }
+
+  const padding = { top: 36, right: 16, bottom: 22, left: 44 };
+  const plotW = width - padding.left - padding.right;
+  const plotH = height - padding.top - padding.bottom;
+
+  const values = bars.map((b) => b.value);
+  const { min, max, step } = options.zeroBaseline ? computeNiceYRange([0, ...values]) : computeNiceYRange(values);
+  const range = max - min || 1;
+  const yFor = (v) => padding.top + plotH - ((v - min) / range) * plotH;
+
+  drawYAxisGrid(ctx, { padding, plotW, width, min, max, step, yFor });
+
+  const n = bars.length;
+  const slot = plotW / n;
+  const barWidth = Math.min(slot * 0.5, 40);
+  const yZero = yFor(Math.max(min, 0));
+
+  bars.forEach((b, i) => {
+    const cx = padding.left + slot * (i + 0.5);
+    const yVal = yFor(b.value);
+    const barTop = Math.min(yVal, yZero);
+    const barH = Math.max(Math.abs(yZero - yVal), 1);
+
+    ctx.fillStyle = b.color || MINT;
+    ctx.fillRect(cx - barWidth / 2, barTop, barWidth, barH);
+
+    if (b.topLabel) {
+      ctx.fillStyle = TEXT_DIM;
+      ctx.font = STAT_CHART_VALUE_FONT;
+      ctx.textAlign = "center";
+      ctx.fillText(b.topLabel, cx, barTop - 6);
+    }
+
+    ctx.fillStyle = TEXT_DIM;
+    ctx.font = STAT_CHART_DATE_FONT;
+    ctx.textAlign = "center";
+    ctx.fillText(b.label, cx, padding.top + plotH + 16);
   });
 }
 

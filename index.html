@@ -188,6 +188,58 @@
           </div>
         </div>
       </div>
+
+      <div class="card" id="running-stats-card">
+        <h2 class="card-title">🏃 러닝 통계</h2>
+
+        <div class="stats-block">
+          <h3 class="stats-subtitle">페이스 추이 (분/km · 빠를수록 위)</h3>
+          <div class="running-target-pace-row">
+            <label>목표 페이스<input type="text" id="running-target-pace-input" placeholder="5'30&quot;" /></label>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-save-target-pace">저장</button>
+          </div>
+          <canvas id="chart-running-pace" class="stat-chart" width="380" height="200"></canvas>
+          <p class="empty-hint" id="empty-running-pace" hidden>아직 러닝 기록이 없어요</p>
+        </div>
+
+        <div class="stats-block">
+          <h3 class="stats-subtitle">심박수 영역 분석 (최근 러닝)</h3>
+          <canvas id="chart-hr-zones" class="stat-chart" width="380" height="200"></canvas>
+          <p id="hr-zone-summary" class="hr-zone-summary" hidden></p>
+          <p class="empty-hint" id="empty-hr-zones" hidden>심박수 영역 데이터가 없어요</p>
+        </div>
+
+        <div class="stats-block">
+          <h3 class="stats-subtitle">파워 효율 (W/kg) 추이</h3>
+          <canvas id="chart-power-efficiency" class="stat-chart" width="380" height="200"></canvas>
+          <p class="empty-hint" id="empty-power-efficiency" hidden>파워 데이터가 없어요</p>
+        </div>
+
+        <div class="stats-block">
+          <h3 class="stats-subtitle">케이던스 추이 (spm · 점선 = 이상적 180)</h3>
+          <canvas id="chart-cadence" class="stat-chart" width="380" height="200"></canvas>
+          <p class="empty-hint" id="empty-cadence" hidden>케이던스 데이터가 없어요</p>
+        </div>
+
+        <div class="stats-block">
+          <h3 class="stats-subtitle">심박수 드리프트 (최근 러닝, 스플릿 전반 vs 후반)</h3>
+          <div id="hr-drift-content" class="hr-drift-content"></div>
+        </div>
+
+        <div class="stats-block">
+          <h3 class="stats-subtitle">km별 스플릿 (최근 러닝)</h3>
+          <canvas id="chart-splits" class="stat-chart" width="380" height="200"></canvas>
+          <div id="splits-negative-badge" class="splits-negative-badge" hidden>✅ 네거티브 스플릿!</div>
+          <p class="empty-hint" id="empty-splits" hidden>스플릿 데이터가 없어요</p>
+        </div>
+      </div>
+
+      <div class="section-header">
+        <h2 class="card-title">러닝 기록</h2>
+      </div>
+      <div id="running-log-list" class="summary-list">
+        <p class="empty-hint">기록된 러닝이 없어요.</p>
+      </div>
     </section>
 
     <!-- 인바디 -->
@@ -327,6 +379,28 @@
         </form>
       </div>
 
+      <button type="button" class="btn btn-primary btn-block" id="btn-toggle-running-goals-form">러닝 목표 설정 +</button>
+      <div id="running-goal-summary" class="goal-summary"></div>
+
+      <div class="card" id="running-goals-form-card" hidden>
+        <h2 class="card-title">러닝 목표</h2>
+        <form id="running-goals-form" class="form-grid">
+          <label>목표 페이스 (분'초"/km)<input type="text" id="running-goal-pace" placeholder="5'30&quot;" /></label>
+          <label>목표 주간 거리(km)<input type="number" step="0.1" id="running-goal-weekly-km" /></label>
+          <label>목표 심박수 영역3 이상 비율(%)<input type="number" step="1" id="running-goal-zone3-pct" /></label>
+          <button type="submit" class="btn btn-primary btn-block">저장</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Gemini API 키</h2>
+        <p class="stats-hint">피트니스 이미지 분석, 러닝 코멘트 생성에 사용돼요</p>
+        <form id="api-key-form" class="form-grid">
+          <label>API 키<input type="password" id="gemini-api-key" placeholder="AIza..." autocomplete="off" /></label>
+          <button type="submit" class="btn btn-primary btn-block">저장</button>
+        </form>
+      </div>
+
       <div class="card" id="notify-settings-card">
         <h2 class="card-title">운동 알림 설정</h2>
         <div id="notify-permission-status" class="notify-permission-status"></div>
@@ -433,6 +507,11 @@
     </div>
 
     <form id="form-running" class="form-grid" hidden>
+      <button type="button" class="btn btn-ghost btn-block" id="btn-import-fitness-image">📱 피트니스 앱에서 가져오기</button>
+      <input type="file" id="fitness-image-input" accept="image/*" multiple hidden />
+      <div id="fitness-import-status" class="fitness-import-status" hidden></div>
+      <div id="fitness-import-preview" class="fitness-import-preview" hidden></div>
+
       <label>거리(km)<input type="number" step="0.01" id="running-distance" required /></label>
       <label>시간(분)<input type="number" step="0.1" id="running-duration" required /></label>
       <div class="pace-preview">페이스: <span id="running-pace-preview">-</span> 분/km</div>
@@ -550,6 +629,19 @@
     <div id="equipment-log-detail-content"></div>
     <div class="modal-actions">
       <button type="button" class="btn btn-primary btn-block" id="btn-close-equipment-log-detail">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 러닝 기록 상세 팝업 -->
+<div class="modal-overlay" id="modal-running-detail" hidden>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h2 class="card-title" id="running-detail-title"></h2>
+    <div id="running-detail-content"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-danger" id="btn-delete-running-detail">삭제</button>
+      <button type="button" class="btn btn-primary" id="btn-close-running-detail">닫기</button>
     </div>
   </div>
 </div>

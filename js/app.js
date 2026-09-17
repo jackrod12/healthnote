@@ -1,6 +1,17 @@
 import * as db from "./db.js";
-import { drawLineChart, drawMultiLineChart, attachChartClickHandler } from "./chart.js";
+import {
+  drawLineChart,
+  drawMultiLineChart,
+  drawPaceTrendChart,
+  drawBarChart,
+  attachChartClickHandler,
+  formatPaceLabel,
+  parsePaceLabel,
+  parseMinutesSeconds,
+  HR_ZONE_COLORS,
+} from "./chart.js";
 import { evaluateAllBadges, renderBadgeIconSvg, formatProgressText, BADGE_CATEGORIES } from "./badges.js";
+import { sanitizeApiKey, parseRunningImages, generateRunningComment } from "./gemini.js";
 
 /* ---------------- helpers ---------------- */
 
@@ -514,6 +525,7 @@ async function renderWorkoutTab() {
   await renderWorkoutLogList(logs);
 
   await renderWorkoutStats();
+  await renderRunningSection();
 
   $("#workout-memo-input").value = await db.getWorkoutMemo(todayStr());
 }
@@ -876,12 +888,16 @@ function sortWorkoutLogsForDisplay(logs) {
   return logs.slice().sort((a, b) => (b.sortOrder ?? b.id) - (a.sortOrder ?? a.id));
 }
 
-/* a new log always goes to the very bottom of today's list */
-async function getBottomSortOrder() {
-  const todaysLogs = await db.getWorkoutLogsByDate(todayStr());
-  if (!todaysLogs.length) return 0;
-  const minKey = Math.min(...todaysLogs.map((l) => l.sortOrder ?? l.id));
+/* a new log always goes to the very bottom of that date's list */
+async function getBottomSortOrderForDate(date) {
+  const dayLogs = await db.getWorkoutLogsByDate(date);
+  if (!dayLogs.length) return 0;
+  const minKey = Math.min(...dayLogs.map((l) => l.sortOrder ?? l.id));
   return minKey - 1;
+}
+
+async function getBottomSortOrder() {
+  return getBottomSortOrderForDate(todayStr());
 }
 
 /* reorder mode: checkbox multi-select + "위로"/"아래로" buttons */
@@ -1564,6 +1580,7 @@ function closeAddWorkoutModal() {
   $("#running-pace-preview").textContent = "-";
   resetStairmasterState();
   resetPreviousRecordInfo();
+  resetFitnessImportState();
   editingLogId = null;
   editingLogSnapshot = null;
   setEditModeIndicator(null);
@@ -1730,6 +1747,173 @@ function updateRunningPacePreview() {
   }
 }
 
+/* ---------------- running: fitness-app image import (Gemini Vision) ---------------- */
+
+let pendingFitnessImport = null;
+
+function resetFitnessImportState() {
+  pendingFitnessImport = null;
+  $("#fitness-import-status").hidden = true;
+  $("#fitness-import-status").textContent = "";
+  $("#fitness-import-preview").hidden = true;
+  $("#fitness-import-preview").innerHTML = "";
+}
+
+/* "32:15" / "0:32:15" / "32분 15초" / "32분" -> 32.25 (decimal minutes) */
+function parseDurationToMinutes(text) {
+  if (text == null || text === "") return null;
+  const str = String(text).trim();
+
+  const colon = str.match(/^(\d+):(\d+)(?::(\d+))?$/);
+  if (colon) {
+    if (colon[3] != null) {
+      return Number(colon[1]) * 60 + Number(colon[2]) + Number(colon[3]) / 60;
+    }
+    return Number(colon[1]) + Number(colon[2]) / 60;
+  }
+
+  const hourMatch = str.match(/(\d+)\s*시간/);
+  const minMatch = str.match(/(\d+)\s*분/);
+  const secMatch = str.match(/(\d+)\s*초/);
+  if (hourMatch || minMatch || secMatch) {
+    const h = hourMatch ? Number(hourMatch[1]) : 0;
+    const m = minMatch ? Number(minMatch[1]) : 0;
+    const s = secMatch ? Number(secMatch[1]) : 0;
+    return h * 60 + m + s / 60;
+  }
+
+  const num = Number(str);
+  return isFinite(num) && str !== "" ? num : null;
+}
+
+/* "9월 7일" / "2026년 9월 7일" / "2026-09-07" -> "2026-09-07" (assumes the
+   current year when the model doesn't report one) */
+function parseParsedDateToIso(text) {
+  if (!text) return null;
+  const str = String(text).trim();
+
+  const iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+
+  const ko = str.match(/(?:(\d{4})\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+  if (ko) {
+    const year = ko[1] ? Number(ko[1]) : new Date().getFullYear();
+    return `${year}-${String(Number(ko[2])).padStart(2, "0")}-${String(Number(ko[3])).padStart(2, "0")}`;
+  }
+  return null;
+}
+
+/* extra (non-form) fields captured from a parsed fitness image, carried
+   through onto the saved workoutLog untouched when there's nothing new */
+function buildRunningExtraFields(pending) {
+  if (!pending) return {};
+  return {
+    location: pending.location ?? null,
+    elapsed_time: pending.elapsed_time ?? null,
+    active_calories: pending.active_calories ?? null,
+    total_calories: pending.total_calories ?? null,
+    avg_heart_rate: pending.avg_heart_rate ?? null,
+    avg_power: pending.avg_power ?? null,
+    avg_cadence: pending.avg_cadence ?? null,
+    intensity_level: pending.intensity_level ?? null,
+    intensity_text: pending.intensity_text ?? null,
+    elevation_gain: pending.elevation_gain ?? null,
+    heart_rate_zones: Array.isArray(pending.heart_rate_zones) ? pending.heart_rate_zones : [],
+    splits: Array.isArray(pending.splits) ? pending.splits : [],
+  };
+}
+
+function applyFitnessImportResult(parsed) {
+  pendingFitnessImport = parsed;
+
+  if (parsed.distance_km != null) $("#running-distance").value = parsed.distance_km;
+  const minutes = parseDurationToMinutes(parsed.duration ?? parsed.elapsed_time);
+  if (minutes != null) $("#running-duration").value = Math.round(minutes * 10) / 10;
+  updateRunningPacePreview();
+
+  const rows = [
+    parsed.date ? `날짜: ${parsed.date}` : null,
+    parsed.location ? `장소: ${parsed.location}` : null,
+    parsed.avg_pace ? `평균 페이스: ${parsed.avg_pace}` : null,
+    parsed.avg_heart_rate != null ? `평균 심박수: ${parsed.avg_heart_rate}bpm` : null,
+    parsed.avg_power != null ? `평균 파워: ${parsed.avg_power}W` : null,
+    parsed.avg_cadence != null ? `평균 케이던스: ${parsed.avg_cadence}spm` : null,
+    parsed.intensity_text ? `운동강도: ${parsed.intensity_level ?? ""} ${parsed.intensity_text}` : null,
+    parsed.elevation_gain != null ? `등반고도: ${parsed.elevation_gain}m` : null,
+    parsed.active_calories != null ? `활동 칼로리: ${parsed.active_calories}kcal` : null,
+    parsed.total_calories != null ? `총 칼로리: ${parsed.total_calories}kcal` : null,
+    Array.isArray(parsed.heart_rate_zones) && parsed.heart_rate_zones.length
+      ? `심박수 영역 ${parsed.heart_rate_zones.length}개 인식됨`
+      : null,
+    Array.isArray(parsed.splits) && parsed.splits.length ? `스플릿 ${parsed.splits.length}개 인식됨` : null,
+  ].filter(Boolean);
+
+  const previewEl = $("#fitness-import-preview");
+  previewEl.innerHTML = rows.length
+    ? `<strong>인식된 데이터</strong>${rows.map((r) => `<div>${r}</div>`).join("")}`
+    : "거리/시간 외 추가 데이터는 인식하지 못했어요.";
+  previewEl.hidden = false;
+}
+
+$("#btn-import-fitness-image").addEventListener("click", () => {
+  $("#fitness-image-input").click();
+});
+
+$("#fitness-image-input").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  if (!files.length) return;
+
+  const apiKey = await db.getSetting("geminiApiKey", "");
+  if (!apiKey) {
+    showToast("설정 탭에서 Gemini API 키를 먼저 입력해주세요");
+    return;
+  }
+
+  const statusEl = $("#fitness-import-status");
+  statusEl.hidden = false;
+  statusEl.textContent = `이미지 ${files.length}장 분석 중...`;
+  $("#fitness-import-preview").hidden = true;
+
+  try {
+    const parsed = await parseRunningImages(apiKey, files);
+    applyFitnessImportResult(parsed);
+    statusEl.textContent = "분석 완료! 아래 내용을 확인하고 저장해주세요.";
+  } catch (err) {
+    statusEl.textContent = `분석 실패: ${err.message}`;
+  }
+});
+
+/* ---------------- running: Gemini post-run comment ---------------- */
+
+async function generateAndSaveRunningComment(logId) {
+  const apiKey = await db.getSetting("geminiApiKey", "");
+  if (!apiKey) return;
+  try {
+    const allLogs = await db.getAllWorkoutLogs();
+    const current = allLogs.find((l) => l.id === logId);
+    if (!current) return;
+
+    const previousRun = allLogs
+      .filter((l) => l.type === "running" && l.id !== logId)
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id))[0];
+
+    const bodyWeightKg = await getLatestBodyWeightKg();
+    const goals = await db.getSetting("runningGoals", null);
+    const comment = await generateRunningComment(apiKey, {
+      run: current,
+      previousRun: previousRun || null,
+      bodyWeightKg,
+      goals,
+    });
+
+    await db.updateWorkoutLog(logId, { ...current, geminiComment: comment });
+    await renderRunningLogList();
+  } catch (err) {
+    console.error("[러닝 코멘트] 생성 실패:", err);
+  }
+}
+
 $("#form-running").addEventListener("submit", async (e) => {
   e.preventDefault();
   const distance = Number($("#running-distance").value);
@@ -1739,35 +1923,349 @@ $("#form-running").addEventListener("submit", async (e) => {
     return;
   }
   const pace = Number((duration / distance).toFixed(2));
+  const extraFields = buildRunningExtraFields(pendingFitnessImport);
 
   if (editingLogId != null) {
-    const updated = { ...editingLogSnapshot, type: "running", distance, duration, pace };
+    const updated = { ...editingLogSnapshot, type: "running", distance, duration, pace, ...extraFields };
     await db.updateWorkoutLog(editingLogId, updated);
     closeAddWorkoutModal();
     const logs = await db.getWorkoutLogsByDate(todayStr());
     await renderWorkoutLogList(logs);
     renderHomeWorkoutSummary(logs);
     await checkForNewBadges();
+    await renderRunningSection();
     showToast("운동 기록이 수정되었어요");
     return;
   }
 
+  const importedDate = parseParsedDateToIso(pendingFitnessImport?.date);
+  const date = importedDate || todayStr();
   const log = {
-    date: todayStr(),
+    date,
     type: "running",
     distance,
     duration,
     pace,
-    sortOrder: await getBottomSortOrder(),
+    ...extraFields,
+    sortOrder: await getBottomSortOrderForDate(date),
     createdAt: Date.now(),
   };
-  await db.addWorkoutLog(log);
+  const newLogId = await db.addWorkoutLog(log);
   closeAddWorkoutModal();
   const logs = await db.getWorkoutLogsByDate(todayStr());
   await renderWorkoutLogList(logs);
   renderHomeWorkoutSummary(logs);
   await checkForNewBadges();
-  showToast("러닝이 기록되었어요");
+  await renderRunningSection();
+  showToast(importedDate && importedDate !== todayStr() ? `러닝이 ${importedDate}로 기록되었어요` : "러닝이 기록되었어요");
+  generateAndSaveRunningComment(newLogId);
+});
+
+/* ---------------- running stats section ---------------- */
+
+async function renderRunningSection() {
+  const allLogs = await db.getAllWorkoutLogs();
+  const runningLogs = allLogs.filter((l) => l.type === "running").sort((a, b) => (a.date < b.date ? -1 : 1));
+
+  await renderPaceTrendChart(runningLogs);
+  await renderHrZoneChart(runningLogs);
+  await renderPowerEfficiencyChart(runningLogs);
+  await renderCadenceChart(runningLogs);
+  renderHrDrift(runningLogs);
+  renderSplitsChart(runningLogs);
+  await renderRunningLogList(runningLogs);
+}
+
+async function renderPaceTrendChart(runningLogs) {
+  const recent = runningLogs.slice(-20);
+  const canvas = $("#chart-running-pace");
+  const emptyEl = $("#empty-running-pace");
+  const hasData = recent.length > 0;
+  canvas.hidden = !hasData;
+  emptyEl.hidden = hasData;
+
+  const goals = await db.getSetting("runningGoals", null);
+  const targetPace = goals?.targetPaceMin ?? null;
+  if (document.activeElement?.id !== "running-target-pace-input") {
+    $("#running-target-pace-input").value = goals?.targetPaceLabel || "";
+  }
+
+  if (!hasData) return;
+
+  const dateLabels = recent.map((l) => l.date.slice(5));
+  const points = recent.map((l, i) => ({ index: i, value: l.pace, date: l.date, logId: l.id }));
+  drawPaceTrendChart(canvas, dateLabels, points, { targetPace });
+  attachChartClickHandler(canvas, (point) => {
+    if (point.logId != null) openRunningDetail(point.logId);
+  });
+}
+
+$("#btn-save-target-pace").addEventListener("click", async () => {
+  const targetPaceMin = parsePaceLabel($("#running-target-pace-input").value);
+  if ($("#running-target-pace-input").value.trim() && targetPaceMin == null) {
+    showToast(`목표 페이스는 5'30" 형식으로 입력해주세요`);
+    return;
+  }
+  const goals = await db.getSetting("runningGoals", {});
+  const updated = {
+    ...goals,
+    targetPaceMin,
+    targetPaceLabel: targetPaceMin != null ? formatPaceLabel(targetPaceMin) : "",
+  };
+  await db.setSetting("runningGoals", updated);
+  renderRunningGoalSummary(updated);
+  showToast("목표 페이스가 저장되었어요");
+  await renderPaceTrendChart(
+    (await db.getAllWorkoutLogs()).filter((l) => l.type === "running").sort((a, b) => (a.date < b.date ? -1 : 1))
+  );
+});
+
+async function renderHrZoneChart(runningLogs) {
+  const canvas = $("#chart-hr-zones");
+  const emptyEl = $("#empty-hr-zones");
+  const summaryEl = $("#hr-zone-summary");
+  const latest = runningLogs[runningLogs.length - 1];
+  const zones = latest?.heart_rate_zones;
+  const hasData = Array.isArray(zones) && zones.length > 0;
+  canvas.hidden = !hasData;
+  emptyEl.hidden = hasData;
+  summaryEl.hidden = !hasData;
+  if (!hasData) return;
+
+  const bars = zones.map((z) => ({
+    label: `영역${z.zone}`,
+    value: parseMinutesSeconds(z.duration) ?? 0,
+    color: HR_ZONE_COLORS[z.zone] || "#888",
+    topLabel: z.duration ?? "",
+  }));
+  drawBarChart(canvas, bars, { zeroBaseline: true });
+
+  const zoneMinutes = (zoneNums) =>
+    zones
+      .filter((z) => zoneNums.includes(z.zone))
+      .reduce((sum, z) => sum + (parseMinutesSeconds(z.duration) ?? 0), 0);
+  const totalMin = bars.reduce((sum, b) => sum + b.value, 0) || 1;
+  const lowPct = Math.round((zoneMinutes([1, 2]) / totalMin) * 100);
+  const highPct = Math.round((zoneMinutes([4, 5]) / totalMin) * 100);
+  summaryEl.textContent = `유산소 기반 훈련 ${lowPct}%, 고강도 ${highPct}%`;
+}
+
+async function renderPowerEfficiencyChart(runningLogs) {
+  const withPower = runningLogs.filter((l) => l.avg_power != null).slice(-20);
+  const canvas = $("#chart-power-efficiency");
+  const emptyEl = $("#empty-power-efficiency");
+  const hasData = withPower.length > 0;
+  canvas.hidden = !hasData;
+  emptyEl.hidden = hasData;
+  if (!hasData) return;
+
+  const bodyWeightKg = await getLatestBodyWeightKg();
+  const dateLabels = withPower.map((l) => l.date.slice(5));
+  const series = [
+    {
+      name: "파워 효율",
+      color: "#00e5a0",
+      points: withPower.map((l, i) => ({
+        index: i,
+        value: Math.round((l.avg_power / bodyWeightKg) * 100) / 100,
+        date: l.date,
+        logId: l.id,
+      })),
+    },
+  ];
+  drawMultiLineChart(canvas, dateLabels, series, { unit: "W/kg" });
+}
+
+async function renderCadenceChart(runningLogs) {
+  const withCadence = runningLogs.filter((l) => l.avg_cadence != null).slice(-20);
+  const canvas = $("#chart-cadence");
+  const emptyEl = $("#empty-cadence");
+  const hasData = withCadence.length > 0;
+  canvas.hidden = !hasData;
+  emptyEl.hidden = hasData;
+  if (!hasData) return;
+
+  const dateLabels = withCadence.map((l) => l.date.slice(5));
+  const series = [
+    {
+      name: "케이던스",
+      color: "#00e5a0",
+      points: withCadence.map((l, i) => ({ index: i, value: l.avg_cadence, date: l.date, logId: l.id })),
+    },
+  ];
+  drawMultiLineChart(canvas, dateLabels, series, {
+    unit: "spm",
+    referenceLine: { value: 180, label: "180 (이상적)", color: "#9a9a9a" },
+  });
+}
+
+function renderHrDrift(runningLogs) {
+  const el = $("#hr-drift-content");
+  const latest = runningLogs[runningLogs.length - 1];
+  const splits = latest?.splits;
+  const hrValues = Array.isArray(splits)
+    ? splits.map((s) => Number(s.heart_rate)).filter((v) => isFinite(v))
+    : [];
+
+  if (hrValues.length < 2) {
+    el.innerHTML = `<p class="empty-hint">스플릿 심박수 데이터가 부족해요</p>`;
+    return;
+  }
+
+  const half = Math.floor(hrValues.length / 2);
+  const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+  // round each half's average first, then diff the rounded numbers — so the
+  // displayed drift always matches what you'd get subtracting the two
+  // displayed bpm values by hand
+  const firstAvg = Math.round(avg(hrValues.slice(0, half)));
+  const secondAvg = Math.round(avg(hrValues.slice(half)));
+  const drift = secondAvg - firstAvg;
+
+  el.innerHTML = `
+    <div>전반 평균 ${firstAvg}bpm → 후반 평균 ${secondAvg}bpm</div>
+    <div class="hr-drift-value">${drift >= 0 ? "+" : ""}${drift}bpm 드리프트</div>
+  `;
+}
+
+function renderSplitsChart(runningLogs) {
+  const canvas = $("#chart-splits");
+  const emptyEl = $("#empty-splits");
+  const badgeEl = $("#splits-negative-badge");
+  const latest = runningLogs[runningLogs.length - 1];
+  const splits = latest?.splits;
+  const hasData = Array.isArray(splits) && splits.length > 0;
+  canvas.hidden = !hasData;
+  emptyEl.hidden = hasData;
+  badgeEl.hidden = true;
+  if (!hasData) return;
+
+  const bars = splits.map((s) => ({
+    label: `${s.km}`,
+    value: parsePaceLabel(s.pace) ?? 0,
+    color: "#00e5a0",
+    topLabel: s.heart_rate != null ? `${s.heart_rate}bpm` : "",
+  }));
+  drawBarChart(canvas, bars);
+
+  const paceValues = splits.map((s) => parsePaceLabel(s.pace)).filter((v) => v != null);
+  if (paceValues.length >= 2) {
+    const half = Math.floor(paceValues.length / 2);
+    const firstAvg = paceValues.slice(0, half).reduce((a, b) => a + b, 0) / half;
+    const secondAvg = paceValues.slice(half).reduce((a, b) => a + b, 0) / (paceValues.length - half);
+    badgeEl.hidden = !(secondAvg < firstAvg);
+  }
+}
+
+async function renderRunningLogList(runningLogsSorted) {
+  const container = $("#running-log-list");
+  const runningLogs =
+    runningLogsSorted ?? (await db.getAllWorkoutLogs()).filter((l) => l.type === "running").sort((a, b) => (a.date < b.date ? -1 : 1));
+  const ordered = runningLogs.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id));
+
+  if (!ordered.length) {
+    container.innerHTML = `<p class="empty-hint">기록된 러닝이 없어요.</p>`;
+    return;
+  }
+
+  const bodyWeightKg = await getLatestBodyWeightKg();
+  container.innerHTML = "";
+  ordered.forEach((log) => {
+    const calories = log.total_calories ?? Math.round(calcRunningCalories(log, bodyWeightKg));
+    const div = document.createElement("div");
+    div.className = "log-item running-log-item";
+    div.innerHTML = `
+      <div class="log-main">
+        <span class="log-title">${log.date} · ${log.distance}km</span>
+        <span class="log-sub">페이스 ${formatPaceLabel(log.pace)}/km${
+      log.avg_heart_rate != null ? ` · 심박수 ${log.avg_heart_rate}bpm` : ""
+    } · 칼로리 ${Math.round(calories)}kcal</span>
+        ${log.geminiComment ? `<div class="running-log-comment">🤖 ${log.geminiComment}</div>` : ""}
+      </div>`;
+    div.addEventListener("click", () => openRunningDetail(log.id));
+    container.appendChild(div);
+  });
+}
+
+let currentRunningDetailId = null;
+
+async function openRunningDetail(logId) {
+  const allLogs = await db.getAllWorkoutLogs();
+  const log = allLogs.find((l) => l.id === logId);
+  if (!log) return;
+  currentRunningDetailId = logId;
+
+  $("#running-detail-title").textContent = `${log.date} · ${log.distance}km 러닝`;
+
+  const bodyWeightKg = await getLatestBodyWeightKg();
+  const calories = log.total_calories ?? Math.round(calcRunningCalories(log, bodyWeightKg));
+
+  const summaryHtml = `
+    <div class="running-detail-section">
+      <h3>요약</h3>
+      <div class="log-table-detail">
+        <div>거리: ${log.distance}km</div>
+        <div>시간: ${log.duration}분</div>
+        <div>페이스: ${formatPaceLabel(log.pace)}/km</div>
+        ${log.location ? `<div>장소: ${log.location}</div>` : ""}
+        ${log.avg_heart_rate != null ? `<div>평균 심박수: ${log.avg_heart_rate}bpm</div>` : ""}
+        ${log.avg_power != null ? `<div>평균 파워: ${log.avg_power}W</div>` : ""}
+        ${log.avg_cadence != null ? `<div>평균 케이던스: ${log.avg_cadence}spm</div>` : ""}
+        ${log.elevation_gain != null ? `<div>등반고도: ${log.elevation_gain}m</div>` : ""}
+        ${log.intensity_text ? `<div>운동강도: ${log.intensity_level ?? ""} ${log.intensity_text}</div>` : ""}
+        <div>칼로리: 약 ${Math.round(calories)}kcal</div>
+      </div>
+    </div>`;
+
+  const zonesHtml =
+    Array.isArray(log.heart_rate_zones) && log.heart_rate_zones.length
+      ? `<div class="running-detail-section"><h3>심박수 영역</h3>${log.heart_rate_zones
+          .map(
+            (z) =>
+              `<div class="hr-zone-row"><span class="hr-zone-dot" style="background:${
+                HR_ZONE_COLORS[z.zone] || "#888"
+              }"></span>영역${z.zone} · ${z.duration ?? "-"}${z.bpm_range ? ` (${z.bpm_range})` : ""}</div>`
+          )
+          .join("")}</div>`
+      : "";
+
+  const splitsHtml =
+    Array.isArray(log.splits) && log.splits.length
+      ? `<div class="running-detail-section"><h3>스플릿</h3>
+          <table class="log-table">
+            <thead><tr><th>km</th><th>시간</th><th>페이스</th><th>심박수</th><th>파워</th></tr></thead>
+            <tbody>${log.splits
+              .map(
+                (s) =>
+                  `<tr><td>${s.km}</td><td>${s.time ?? "-"}</td><td>${s.pace ?? "-"}</td><td>${s.heart_rate ?? "-"}</td><td>${s.power ?? "-"}</td></tr>`
+              )
+              .join("")}</tbody>
+          </table>
+        </div>`
+      : "";
+
+  const commentHtml = log.geminiComment
+    ? `<div class="running-detail-section"><h3>🤖 Gemini 코멘트</h3><p>${log.geminiComment}</p></div>`
+    : "";
+
+  $("#running-detail-content").innerHTML = summaryHtml + zonesHtml + splitsHtml + commentHtml;
+  $("#modal-running-detail").hidden = false;
+}
+
+$("#btn-close-running-detail").addEventListener("click", () => {
+  $("#modal-running-detail").hidden = true;
+  currentRunningDetailId = null;
+});
+
+$("#btn-delete-running-detail").addEventListener("click", async () => {
+  if (currentRunningDetailId == null) return;
+  if (!confirm("정말 삭제할까요?")) return;
+  await db.deleteWorkoutLog(currentRunningDetailId);
+  $("#modal-running-detail").hidden = true;
+  currentRunningDetailId = null;
+  await renderRunningSection();
+  const logs = await db.getWorkoutLogsByDate(todayStr());
+  await renderWorkoutLogList(logs);
+  renderHomeWorkoutSummary(logs);
 });
 
 /* ---------------- inbody tab ---------------- */
@@ -2158,6 +2656,64 @@ btnToggleGoalsForm.addEventListener("click", () => {
   else closeGoalsForm();
 });
 
+/* ---------------- settings tab: running goals ---------------- */
+
+function renderRunningGoalSummary(goals) {
+  const parts = [];
+  if (goals?.targetPaceLabel) parts.push(`페이스 ${goals.targetPaceLabel}/km`);
+  if (goals?.targetWeeklyKm) parts.push(`주간 ${goals.targetWeeklyKm}km`);
+  if (goals?.targetZone3PlusPct) parts.push(`영역3+ ${goals.targetZone3PlusPct}%`);
+  $("#running-goal-summary").textContent = parts.length ? parts.join(" · ") : "아직 설정된 러닝 목표가 없어요.";
+}
+
+const runningGoalsFormCard = $("#running-goals-form-card");
+const btnToggleRunningGoalsForm = $("#btn-toggle-running-goals-form");
+
+function openRunningGoalsForm() {
+  runningGoalsFormCard.hidden = false;
+  btnToggleRunningGoalsForm.textContent = "닫기";
+}
+
+function closeRunningGoalsForm() {
+  runningGoalsFormCard.hidden = true;
+  btnToggleRunningGoalsForm.textContent = "러닝 목표 설정 +";
+}
+
+btnToggleRunningGoalsForm.addEventListener("click", () => {
+  if (runningGoalsFormCard.hidden) openRunningGoalsForm();
+  else closeRunningGoalsForm();
+});
+
+$("#running-goals-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const targetPaceMin = parsePaceLabel($("#running-goal-pace").value);
+  if ($("#running-goal-pace").value.trim() && targetPaceMin == null) {
+    showToast(`목표 페이스는 5'30" 형식으로 입력해주세요`);
+    return;
+  }
+  const goals = {
+    targetPaceMin,
+    targetPaceLabel: targetPaceMin != null ? formatPaceLabel(targetPaceMin) : "",
+    targetWeeklyKm: Number($("#running-goal-weekly-km").value) || null,
+    targetZone3PlusPct: Number($("#running-goal-zone3-pct").value) || null,
+  };
+  await db.setSetting("runningGoals", goals);
+  renderRunningGoalSummary(goals);
+  closeRunningGoalsForm();
+  await renderRunningSection();
+  showToast("러닝 목표가 저장되었어요");
+});
+
+/* ---------------- settings tab: Gemini API key ---------------- */
+
+$("#api-key-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const key = sanitizeApiKey($("#gemini-api-key").value);
+  await db.setSetting("geminiApiKey", key);
+  $("#gemini-api-key").value = key;
+  showToast("API 키가 저장되었어요");
+});
+
 /* ---------------- settings tab: workout notification ---------------- */
 
 const NOTIFY_SETTINGS_KEY = "workoutNotify";
@@ -2252,6 +2808,14 @@ async function renderSettingsTab() {
   $("#goal-target-muscle").value = goals.targetMuscleMass ?? "";
   $("#goal-note").value = goals.note ?? "";
   renderGoalSummary(goals);
+
+  const runningGoals = await db.getSetting("runningGoals", {});
+  $("#running-goal-pace").value = runningGoals.targetPaceLabel ?? "";
+  $("#running-goal-weekly-km").value = runningGoals.targetWeeklyKm ?? "";
+  $("#running-goal-zone3-pct").value = runningGoals.targetZone3PlusPct ?? "";
+  renderRunningGoalSummary(runningGoals);
+
+  $("#gemini-api-key").value = await db.getSetting("geminiApiKey", "");
 
   await renderEquipmentList();
   await renderNotifySettings();

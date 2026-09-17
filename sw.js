@@ -9,6 +9,7 @@ const APP_SHELL = [
   "./js/db.js",
   "./js/chart.js",
   "./js/badges.js",
+  "./js/gemini.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-512.png",
