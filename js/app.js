@@ -1520,7 +1520,7 @@ let editingLogSnapshot = null;
 function setEditModeIndicator(text) {
   $("#modal-add-workout-title").textContent = text || "운동 추가";
   $("#btn-finish-weight").textContent = text ? "수정 완료" : "운동 완료";
-  $("#btn-finish-running").textContent = text ? "수정 완료" : "추가";
+  $("#btn-finish-running").textContent = text ? "수정 완료" : "저장";
   $$(".segmented-btn", $("#workout-type-toggle")).forEach((b) => (b.disabled = !!text));
   $("#weight-equipment").disabled = !!text || currentSets.length > 0;
 }
@@ -1538,6 +1538,10 @@ async function startEditWorkoutLog(log) {
 
   if (log.type === "running") {
     setWorkoutTypeToggle("running");
+    $("#running-entry-mode-row").hidden = true;
+    $("#running-manual-fields").hidden = false;
+    $("#running-analysis-result").hidden = true;
+    $("#running-form-actions").hidden = false;
     $("#running-distance").value = log.distance;
     $("#running-duration").value = log.duration;
     updateRunningPacePreview();
@@ -1750,14 +1754,25 @@ function updateRunningPacePreview() {
 /* ---------------- running: fitness-app image import (Gemini Vision) ---------------- */
 
 let pendingFitnessImport = null;
+let pendingRunningComment = null;
 
 function resetFitnessImportState() {
   pendingFitnessImport = null;
+  pendingRunningComment = null;
   $("#fitness-import-status").hidden = true;
   $("#fitness-import-status").textContent = "";
-  $("#fitness-import-preview").hidden = true;
-  $("#fitness-import-preview").innerHTML = "";
+  $("#running-entry-mode-row").hidden = false;
+  $("#running-manual-fields").hidden = true;
+  $("#running-analysis-result").hidden = true;
+  $("#running-analysis-result").innerHTML = "";
+  $("#running-form-actions").hidden = true;
 }
+
+$("#btn-manual-running-entry").addEventListener("click", () => {
+  $("#running-manual-fields").hidden = false;
+  $("#running-analysis-result").hidden = true;
+  $("#running-form-actions").hidden = false;
+});
 
 /* "32:15" / "0:32:15" / "32분 15초" / "32분" -> 32.25 (decimal minutes) */
 function parseDurationToMinutes(text) {
@@ -1823,37 +1838,127 @@ function buildRunningExtraFields(pending) {
   };
 }
 
+/**
+ * Builds the "요약 + 심박수 영역 + 스플릿" HTML blocks shared between the
+ * saved-run detail modal and the pre-save analysis preview — both pass an
+ * object using the same field names (distance/duration/pace/location/
+ * avg_heart_rate/avg_power/avg_cadence/elevation_gain/intensity_level/
+ * intensity_text/heart_rate_zones/splits), plus an already-formatted
+ * calories line so each caller can phrase it its own way.
+ */
+function buildRunningSummaryZonesSplitsHtml(data, caloriesText) {
+  const summaryHtml = `
+    <div class="running-detail-section">
+      <h3>요약</h3>
+      <div class="log-table-detail">
+        ${data.distance != null ? `<div>거리: ${data.distance}km</div>` : ""}
+        ${data.duration != null ? `<div>시간: ${data.duration}분</div>` : ""}
+        ${data.pace != null ? `<div>페이스: ${formatPaceLabel(data.pace)}/km</div>` : ""}
+        ${data.location ? `<div>장소: ${data.location}</div>` : ""}
+        ${data.avg_heart_rate != null ? `<div>평균 심박수: ${data.avg_heart_rate}bpm</div>` : ""}
+        ${data.avg_power != null ? `<div>평균 파워: ${data.avg_power}W</div>` : ""}
+        ${data.avg_cadence != null ? `<div>평균 케이던스: ${data.avg_cadence}spm</div>` : ""}
+        ${data.elevation_gain != null ? `<div>등반고도: ${data.elevation_gain}m</div>` : ""}
+        ${data.intensity_text ? `<div>운동강도: ${data.intensity_level ?? ""} ${data.intensity_text}</div>` : ""}
+        ${caloriesText ? `<div>칼로리: ${caloriesText}</div>` : ""}
+      </div>
+    </div>`;
+
+  const zonesHtml =
+    Array.isArray(data.heart_rate_zones) && data.heart_rate_zones.length
+      ? `<div class="running-detail-section"><h3>심박수 영역</h3>${data.heart_rate_zones
+          .map(
+            (z) =>
+              `<div class="hr-zone-row"><span class="hr-zone-dot" style="background:${
+                HR_ZONE_COLORS[z.zone] || "#888"
+              }"></span>영역${z.zone} · ${z.duration ?? "-"}${z.bpm_range ? ` (${z.bpm_range})` : ""}</div>`
+          )
+          .join("")}</div>`
+      : "";
+
+  const splitsHtml =
+    Array.isArray(data.splits) && data.splits.length
+      ? `<div class="running-detail-section"><h3>스플릿</h3>
+          <table class="log-table">
+            <thead><tr><th>km</th><th>시간</th><th>페이스</th><th>심박수</th><th>파워</th></tr></thead>
+            <tbody>${data.splits
+              .map(
+                (s) =>
+                  `<tr><td>${s.km}</td><td>${s.time ?? "-"}</td><td>${s.pace ?? "-"}</td><td>${s.heart_rate ?? "-"}</td><td>${s.power ?? "-"}</td></tr>`
+              )
+              .join("")}</tbody>
+          </table>
+        </div>`
+      : "";
+
+  return summaryHtml + zonesHtml + splitsHtml;
+}
+
+/* rebuilds #running-analysis-result from pendingFitnessImport + whatever
+   distance/duration the user currently has typed in (so editing them after
+   the fact updates the displayed pace too) + pendingRunningComment */
+function renderRunningAnalysisResult() {
+  const parsed = pendingFitnessImport;
+  if (!parsed) return;
+
+  const distance = Number($("#running-distance").value) || null;
+  const duration = Number($("#running-duration").value) || null;
+  const pace = distance && duration ? Number((duration / distance).toFixed(2)) : null;
+
+  const data = {
+    distance,
+    duration,
+    pace,
+    location: parsed.location,
+    avg_heart_rate: parsed.avg_heart_rate,
+    avg_power: parsed.avg_power,
+    avg_cadence: parsed.avg_cadence,
+    elevation_gain: parsed.elevation_gain,
+    intensity_level: parsed.intensity_level,
+    intensity_text: parsed.intensity_text,
+    heart_rate_zones: parsed.heart_rate_zones,
+    splits: parsed.splits,
+  };
+
+  const caloriesText =
+    [
+      parsed.active_calories != null ? `활동 ${parsed.active_calories}kcal` : null,
+      parsed.total_calories != null ? `총 ${parsed.total_calories}kcal` : null,
+    ]
+      .filter(Boolean)
+      .join(" / ") || null;
+
+  const sectionsHtml = buildRunningSummaryZonesSplitsHtml(data, caloriesText);
+  const commentHtml = `
+    <div class="running-analysis-comment">
+      <span class="running-analysis-comment-label">🤖 Gemini 코멘트</span>
+      <p>${pendingRunningComment || "코멘트 생성 중..."}</p>
+    </div>`;
+
+  $("#running-analysis-result").innerHTML = sectionsHtml + commentHtml;
+}
+
 function applyFitnessImportResult(parsed) {
   pendingFitnessImport = parsed;
+  pendingRunningComment = null;
 
   if (parsed.distance_km != null) $("#running-distance").value = parsed.distance_km;
   const minutes = parseDurationToMinutes(parsed.duration ?? parsed.elapsed_time);
   if (minutes != null) $("#running-duration").value = Math.round(minutes * 10) / 10;
   updateRunningPacePreview();
 
-  const rows = [
-    parsed.date ? `날짜: ${parsed.date}` : null,
-    parsed.location ? `장소: ${parsed.location}` : null,
-    parsed.avg_pace ? `평균 페이스: ${parsed.avg_pace}` : null,
-    parsed.avg_heart_rate != null ? `평균 심박수: ${parsed.avg_heart_rate}bpm` : null,
-    parsed.avg_power != null ? `평균 파워: ${parsed.avg_power}W` : null,
-    parsed.avg_cadence != null ? `평균 케이던스: ${parsed.avg_cadence}spm` : null,
-    parsed.intensity_text ? `운동강도: ${parsed.intensity_level ?? ""} ${parsed.intensity_text}` : null,
-    parsed.elevation_gain != null ? `등반고도: ${parsed.elevation_gain}m` : null,
-    parsed.active_calories != null ? `활동 칼로리: ${parsed.active_calories}kcal` : null,
-    parsed.total_calories != null ? `총 칼로리: ${parsed.total_calories}kcal` : null,
-    Array.isArray(parsed.heart_rate_zones) && parsed.heart_rate_zones.length
-      ? `심박수 영역 ${parsed.heart_rate_zones.length}개 인식됨`
-      : null,
-    Array.isArray(parsed.splits) && parsed.splits.length ? `스플릿 ${parsed.splits.length}개 인식됨` : null,
-  ].filter(Boolean);
-
-  const previewEl = $("#fitness-import-preview");
-  previewEl.innerHTML = rows.length
-    ? `<strong>인식된 데이터</strong>${rows.map((r) => `<div>${r}</div>`).join("")}`
-    : "거리/시간 외 추가 데이터는 인식하지 못했어요.";
-  previewEl.hidden = false;
+  $("#running-manual-fields").hidden = false;
+  renderRunningAnalysisResult();
+  $("#running-analysis-result").hidden = false;
+  $("#running-form-actions").hidden = false;
 }
+
+$("#running-distance").addEventListener("input", () => {
+  if (pendingFitnessImport) renderRunningAnalysisResult();
+});
+$("#running-duration").addEventListener("input", () => {
+  if (pendingFitnessImport) renderRunningAnalysisResult();
+});
 
 $("#btn-import-fitness-image").addEventListener("click", () => {
   $("#fitness-image-input").click();
@@ -1873,18 +1978,73 @@ $("#fitness-image-input").addEventListener("change", async (e) => {
   const statusEl = $("#fitness-import-status");
   statusEl.hidden = false;
   statusEl.textContent = `이미지 ${files.length}장 분석 중...`;
-  $("#fitness-import-preview").hidden = true;
+  $("#running-manual-fields").hidden = true;
+  $("#running-analysis-result").hidden = true;
+  $("#running-form-actions").hidden = true;
+
+  const onRetry = (nextAttempt, maxAttempts) => {
+    statusEl.textContent = `분석 중... (재시도 ${nextAttempt}/${maxAttempts})`;
+  };
 
   try {
-    const parsed = await parseRunningImages(apiKey, files);
+    const parsed = await parseRunningImages(apiKey, files, onRetry);
     applyFitnessImportResult(parsed);
     statusEl.textContent = "분석 완료! 아래 내용을 확인하고 저장해주세요.";
+    generateAnalysisComment();
   } catch (err) {
+    if (err.code === "GEMINI_OVERLOADED") showToast(err.message);
     statusEl.textContent = `분석 실패: ${err.message}`;
   }
 });
 
-/* ---------------- running: Gemini post-run comment ---------------- */
+/* generates the Gemini comment shown in the pre-save analysis preview
+   (called right after a successful image parse); on failure it just shows
+   a short inline note in place of the comment rather than blocking save */
+async function generateAnalysisComment() {
+  const apiKey = await db.getSetting("geminiApiKey", "");
+  if (!apiKey || !pendingFitnessImport) return;
+
+  try {
+    const distance = Number($("#running-distance").value) || null;
+    const duration = Number($("#running-duration").value) || null;
+    const pace = distance && duration ? Number((duration / distance).toFixed(2)) : null;
+
+    const runForComment = {
+      distance,
+      duration,
+      pace,
+      avg_heart_rate: pendingFitnessImport.avg_heart_rate,
+      avg_power: pendingFitnessImport.avg_power,
+      avg_cadence: pendingFitnessImport.avg_cadence,
+      intensity_text: pendingFitnessImport.intensity_text,
+      elevation_gain: pendingFitnessImport.elevation_gain,
+      splits: pendingFitnessImport.splits,
+    };
+
+    const allLogs = await db.getAllWorkoutLogs();
+    const previousRun =
+      allLogs.filter((l) => l.type === "running").sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id))[0] ||
+      null;
+    const bodyWeightKg = await getLatestBodyWeightKg();
+    const goals = await db.getSetting("runningGoals", null);
+
+    const onRetry = (nextAttempt, maxAttempts) => {
+      const statusEl = $("#fitness-import-status");
+      statusEl.hidden = false;
+      statusEl.textContent = `코멘트 생성 중... (재시도 ${nextAttempt}/${maxAttempts})`;
+    };
+
+    pendingRunningComment = await generateRunningComment(apiKey, { run: runForComment, previousRun, bodyWeightKg, goals }, onRetry);
+  } catch (err) {
+    if (err.code === "GEMINI_OVERLOADED") showToast(err.message);
+    pendingRunningComment = `코멘트를 가져오지 못했어요 (${err.message})`;
+  }
+
+  if (pendingFitnessImport) renderRunningAnalysisResult();
+}
+
+/* ---------------- running: Gemini post-run comment (fallback for manual entry
+   or when the pre-save comment above didn't finish in time) ---------------- */
 
 async function generateAndSaveRunningComment(logId) {
   const apiKey = await db.getSetting("geminiApiKey", "");
@@ -1924,9 +2084,11 @@ $("#form-running").addEventListener("submit", async (e) => {
   }
   const pace = Number((duration / distance).toFixed(2));
   const extraFields = buildRunningExtraFields(pendingFitnessImport);
+  const hadComment = !!pendingRunningComment;
+  const commentField = hadComment ? { geminiComment: pendingRunningComment } : {};
 
   if (editingLogId != null) {
-    const updated = { ...editingLogSnapshot, type: "running", distance, duration, pace, ...extraFields };
+    const updated = { ...editingLogSnapshot, type: "running", distance, duration, pace, ...extraFields, ...commentField };
     await db.updateWorkoutLog(editingLogId, updated);
     closeAddWorkoutModal();
     const logs = await db.getWorkoutLogsByDate(todayStr());
@@ -1947,6 +2109,7 @@ $("#form-running").addEventListener("submit", async (e) => {
     duration,
     pace,
     ...extraFields,
+    ...commentField,
     sortOrder: await getBottomSortOrderForDate(date),
     createdAt: Date.now(),
   };
@@ -1958,7 +2121,9 @@ $("#form-running").addEventListener("submit", async (e) => {
   await checkForNewBadges();
   await renderRunningSection();
   showToast(importedDate && importedDate !== todayStr() ? `러닝이 ${importedDate}로 기록되었어요` : "러닝이 기록되었어요");
-  generateAndSaveRunningComment(newLogId);
+  if (!hadComment) {
+    generateAndSaveRunningComment(newLogId);
+  }
 });
 
 /* ---------------- running stats section ---------------- */
@@ -2199,55 +2364,12 @@ async function openRunningDetail(logId) {
   const bodyWeightKg = await getLatestBodyWeightKg();
   const calories = log.total_calories ?? Math.round(calcRunningCalories(log, bodyWeightKg));
 
-  const summaryHtml = `
-    <div class="running-detail-section">
-      <h3>요약</h3>
-      <div class="log-table-detail">
-        <div>거리: ${log.distance}km</div>
-        <div>시간: ${log.duration}분</div>
-        <div>페이스: ${formatPaceLabel(log.pace)}/km</div>
-        ${log.location ? `<div>장소: ${log.location}</div>` : ""}
-        ${log.avg_heart_rate != null ? `<div>평균 심박수: ${log.avg_heart_rate}bpm</div>` : ""}
-        ${log.avg_power != null ? `<div>평균 파워: ${log.avg_power}W</div>` : ""}
-        ${log.avg_cadence != null ? `<div>평균 케이던스: ${log.avg_cadence}spm</div>` : ""}
-        ${log.elevation_gain != null ? `<div>등반고도: ${log.elevation_gain}m</div>` : ""}
-        ${log.intensity_text ? `<div>운동강도: ${log.intensity_level ?? ""} ${log.intensity_text}</div>` : ""}
-        <div>칼로리: 약 ${Math.round(calories)}kcal</div>
-      </div>
-    </div>`;
-
-  const zonesHtml =
-    Array.isArray(log.heart_rate_zones) && log.heart_rate_zones.length
-      ? `<div class="running-detail-section"><h3>심박수 영역</h3>${log.heart_rate_zones
-          .map(
-            (z) =>
-              `<div class="hr-zone-row"><span class="hr-zone-dot" style="background:${
-                HR_ZONE_COLORS[z.zone] || "#888"
-              }"></span>영역${z.zone} · ${z.duration ?? "-"}${z.bpm_range ? ` (${z.bpm_range})` : ""}</div>`
-          )
-          .join("")}</div>`
-      : "";
-
-  const splitsHtml =
-    Array.isArray(log.splits) && log.splits.length
-      ? `<div class="running-detail-section"><h3>스플릿</h3>
-          <table class="log-table">
-            <thead><tr><th>km</th><th>시간</th><th>페이스</th><th>심박수</th><th>파워</th></tr></thead>
-            <tbody>${log.splits
-              .map(
-                (s) =>
-                  `<tr><td>${s.km}</td><td>${s.time ?? "-"}</td><td>${s.pace ?? "-"}</td><td>${s.heart_rate ?? "-"}</td><td>${s.power ?? "-"}</td></tr>`
-              )
-              .join("")}</tbody>
-          </table>
-        </div>`
-      : "";
-
+  const sectionsHtml = buildRunningSummaryZonesSplitsHtml(log, `약 ${Math.round(calories)}kcal`);
   const commentHtml = log.geminiComment
     ? `<div class="running-detail-section"><h3>🤖 Gemini 코멘트</h3><p>${log.geminiComment}</p></div>`
     : "";
 
-  $("#running-detail-content").innerHTML = summaryHtml + zonesHtml + splitsHtml + commentHtml;
+  $("#running-detail-content").innerHTML = sectionsHtml + commentHtml;
   $("#modal-running-detail").hidden = false;
 }
 

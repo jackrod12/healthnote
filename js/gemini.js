@@ -1,5 +1,16 @@
-const MODEL = "gemini-3.6-flash";
+const MODEL = "gemini-2.0-flash";
 const GENERATE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 503 means the model is overloaded, not that anything about our request was
+// wrong — worth a couple of delayed retries. Every other error status (bad
+// key, bad request, quota) will just fail the same way again immediately,
+// so those aren't retried.
+const RETRY_DELAYS_MS = [2000, 5000];
+const MAX_ATTEMPTS = 1 + RETRY_DELAYS_MS.length;
 
 const ZERO_WIDTH_CHARS_PATTERN = "​‌‍﻿";
 const SANITIZE_PATTERN = new RegExp(`[\\s${ZERO_WIDTH_CHARS_PATTERN}]`, "g");
@@ -33,33 +44,57 @@ export function imageFileToInlineData(file) {
   });
 }
 
-async function callGemini(apiKey, parts, { responseMimeType, temperature = 0.3, maxOutputTokens = 2048 } = {}) {
+/**
+ * @param {string} apiKey
+ * @param {object[]} parts
+ * @param {{responseMimeType?: string, temperature?: number, maxOutputTokens?: number,
+ *   onRetry?: (nextAttempt: number, maxAttempts: number) => void}} [options] -
+ *   onRetry fires right before each delayed retry (only on a 503), so the
+ *   caller can show "재시도 N/3" while callGemini itself sleeps and retries.
+ */
+async function callGemini(apiKey, parts, options = {}) {
+  const { responseMimeType, temperature = 0.3, maxOutputTokens = 2048, onRetry } = options;
   const key = requireApiKey(apiKey);
 
   const generationConfig = { temperature, maxOutputTokens };
   if (responseMimeType) generationConfig.responseMimeType = responseMimeType;
 
-  const res = await fetch(GENERATE_ENDPOINT, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts }],
-      generationConfig,
-    }),
-  });
+  let lastStatus = null;
+  let lastErrorBody = "";
 
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => "");
-    const keyPreview = key.length > 10 ? `${key.slice(0, 6)}...${key.slice(-4)}` : key;
-    throw new Error(`Gemini API 오류 (${res.status}, 키: ${keyPreview}): ${errBody.slice(0, 200)}`);
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(GENERATE_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const text = (data?.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
+      if (!text.trim()) {
+        throw new Error("Gemini 응답을 받지 못했습니다.");
+      }
+      return text.trim();
+    }
+
+    lastStatus = res.status;
+    lastErrorBody = await res.text().catch(() => "");
+
+    if (res.status !== 503 || attempt === MAX_ATTEMPTS) break;
+
+    const nextAttempt = attempt + 1;
+    onRetry?.(nextAttempt, MAX_ATTEMPTS);
+    await sleep(RETRY_DELAYS_MS[attempt - 1]);
   }
 
-  const data = await res.json();
-  const text = (data?.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
-  if (!text.trim()) {
-    throw new Error("Gemini 응답을 받지 못했습니다.");
+  if (lastStatus === 503) {
+    const err = new Error("Gemini 서버가 혼잡해요. 잠시 후 다시 시도해주세요.");
+    err.code = "GEMINI_OVERLOADED";
+    throw err;
   }
-  return text.trim();
+  const keyPreview = key.length > 10 ? `${key.slice(0, 6)}...${key.slice(-4)}` : key;
+  throw new Error(`Gemini API 오류 (${lastStatus}, 키: ${keyPreview}): ${lastErrorBody.slice(0, 200)}`);
 }
 
 /* strips ```json ... ``` / ``` ... ``` fences a model sometimes wraps JSON
@@ -88,16 +123,22 @@ const VISION_PROMPT = `이 Apple Fitness 운동 기록 이미지들에서 다음
  *
  * @param {string} apiKey
  * @param {File[]} imageFiles
+ * @param {(nextAttempt: number, maxAttempts: number) => void} [onRetry]
  * @returns {Promise<object>} parsed running data, field names per VISION_PROMPT
  */
-export async function parseRunningImages(apiKey, imageFiles) {
+export async function parseRunningImages(apiKey, imageFiles, onRetry) {
   if (!imageFiles.length) {
     throw new Error("분석할 이미지를 먼저 선택해주세요.");
   }
   const inlineImages = await Promise.all(imageFiles.map(imageFileToInlineData));
   const parts = [{ text: VISION_PROMPT }, ...inlineImages.map((img) => ({ inline_data: img }))];
 
-  const text = await callGemini(apiKey, parts, { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens: 4096 });
+  const text = await callGemini(apiKey, parts, {
+    responseMimeType: "application/json",
+    temperature: 0.1,
+    maxOutputTokens: 4096,
+    onRetry,
+  });
 
   try {
     return JSON.parse(stripCodeFence(text));
@@ -107,15 +148,17 @@ export async function parseRunningImages(apiKey, imageFiles) {
 }
 
 /**
- * Asks Gemini for a short (<=200자) Korean feedback + next-training tip
- * comment on a just-saved run, given the run itself, the previous run for
- * comparison, and the user's latest body weight / running goals.
+ * Asks Gemini to analyze a run — overall assessment, what went well, what to
+ * improve, and a next-training suggestion — given the run itself, the
+ * previous run for comparison, and the user's latest body weight / running
+ * goals.
  *
  * @param {string} apiKey
  * @param {{ run: object, previousRun: object|null, bodyWeightKg: number|null, goals: object|null }} context
+ * @param {(nextAttempt: number, maxAttempts: number) => void} [onRetry]
  * @returns {Promise<string>}
  */
-export async function generateRunningComment(apiKey, { run, previousRun, bodyWeightKg, goals }) {
+export async function generateRunningComment(apiKey, { run, previousRun, bodyWeightKg, goals }, onRetry) {
   const fmt = (v, unit = "") => (v === null || v === undefined || v === "" ? "정보 없음" : `${v}${unit}`);
 
   const runText = [
@@ -125,6 +168,8 @@ export async function generateRunningComment(apiKey, { run, previousRun, bodyWei
     `평균 심박수 ${fmt(run.avg_heart_rate, "bpm")}`,
     `평균 파워 ${fmt(run.avg_power, "W")}`,
     `평균 케이던스 ${fmt(run.avg_cadence, "spm")}`,
+    `운동강도 ${fmt(run.intensity_text)}`,
+    `등반고도 ${fmt(run.elevation_gain, "m")}`,
     run.splits?.length ? `스플릿 ${run.splits.length}개` : null,
   ]
     .filter(Boolean)
@@ -148,12 +193,17 @@ export async function generateRunningComment(apiKey, { run, previousRun, bodyWei
         .join(", ") || "설정된 목표 없음"
     : "설정된 목표 없음";
 
-  const prompt = `너는 러닝 코치야. 아래 이번 러닝 기록을 분석해서 피드백과 다음 훈련 팁을 한국어로 200자 이내로 답변해줘. 다른 설명 없이 피드백 본문만 답변해.
+  const prompt = `이 러닝 데이터를 분석해서 한국어로 알려줘:
+1. 이번 러닝 총평 (페이스, 심박수, 파워 종합)
+2. 잘한 점
+3. 개선할 점
+4. 다음 훈련 추천
+최대 300자로 간결하게. 다른 설명 없이 본문만 답변해.
 
 [이번 러닝] ${runText}
 [이전 러닝] ${prevText}
 [체중] ${fmt(bodyWeightKg, "kg")}
 [목표] ${goalsText}`;
 
-  return callGemini(apiKey, [{ text: prompt }], { temperature: 0.6, maxOutputTokens: 512 });
+  return callGemini(apiKey, [{ text: prompt }], { temperature: 0.6, maxOutputTokens: 512, onRetry });
 }

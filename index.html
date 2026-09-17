@@ -507,17 +507,24 @@
     </div>
 
     <form id="form-running" class="form-grid" hidden>
-      <button type="button" class="btn btn-ghost btn-block" id="btn-import-fitness-image">📱 피트니스 앱에서 가져오기</button>
+      <div class="btn-row" id="running-entry-mode-row">
+        <button type="button" class="btn btn-ghost" id="btn-import-fitness-image">📱 피트니스 앱에서 가져오기</button>
+        <button type="button" class="btn btn-ghost" id="btn-manual-running-entry">✍️ 직접 입력</button>
+      </div>
       <input type="file" id="fitness-image-input" accept="image/*" multiple hidden />
       <div id="fitness-import-status" class="fitness-import-status" hidden></div>
-      <div id="fitness-import-preview" class="fitness-import-preview" hidden></div>
 
-      <label>거리(km)<input type="number" step="0.01" id="running-distance" required /></label>
-      <label>시간(분)<input type="number" step="0.1" id="running-duration" required /></label>
-      <div class="pace-preview">페이스: <span id="running-pace-preview">-</span> 분/km</div>
-      <div class="modal-actions">
+      <div id="running-manual-fields" class="form-grid" hidden>
+        <label>거리(km)<input type="number" step="0.01" id="running-distance" required /></label>
+        <label>시간(분)<input type="number" step="0.1" id="running-duration" required /></label>
+        <div class="pace-preview">페이스: <span id="running-pace-preview">-</span> 분/km</div>
+      </div>
+
+      <div id="running-analysis-result" class="running-analysis-result" hidden></div>
+
+      <div class="modal-actions" id="running-form-actions" hidden>
         <button type="button" class="btn btn-ghost" id="btn-cancel-running">취소</button>
-        <button type="submit" class="btn btn-primary" id="btn-finish-running">추가</button>
+        <button type="submit" class="btn btn-primary" id="btn-finish-running">저장</button>
       </div>
     </form>
   </div>

@@ -1350,18 +1350,26 @@ input[type="range"] {
   color: var(--text-dim);
   text-align: center;
 }
-.fitness-import-preview {
-  background: var(--card-alt);
-  border-radius: 12px;
-  padding: 10px 12px;
+.running-analysis-result {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--text-dim);
+  gap: 12px;
 }
-.fitness-import-preview strong {
+.running-analysis-comment {
+  background: var(--card-alt);
+  border: 1px solid var(--mint-dim);
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--text);
+}
+.running-analysis-comment .running-analysis-comment-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mint);
+  margin-bottom: 6px;
 }
 
 /* Running stats */
