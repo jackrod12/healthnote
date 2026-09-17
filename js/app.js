@@ -939,6 +939,15 @@ async function applyReorderMove(direction) {
 $("#btn-reorder-up").addEventListener("click", () => applyReorderMove("up"));
 $("#btn-reorder-down").addEventListener("click", () => applyReorderMove("down"));
 
+/* newly-created logs carry their own manufacturer snapshot; logs saved
+   before that field existed fall back to a live lookup in the current
+   equipment list by equipmentId */
+function getWorkoutLogManufacturer(log) {
+  if (log.manufacturer) return log.manufacturer;
+  if (log.equipmentId == null) return "";
+  return equipmentCache.find((eq) => eq.id === log.equipmentId)?.manufacturer || "";
+}
+
 async function renderWorkoutLogList(logs) {
   const container = $("#workout-log-list");
   const totalsEl = $("#workout-log-totals");
@@ -963,9 +972,11 @@ async function renderWorkoutLogList(logs) {
         const calories = calcWeightLogCalories(log, bodyWeightKg);
         totalVolume += volume;
         totalCalories += calories;
+        const manufacturer = getWorkoutLogManufacturer(log);
         mainHtml = `
           <div class="log-main">
             <span class="log-title">${log.equipmentName}</span>
+            ${manufacturer ? `<span class="log-manufacturer">${manufacturer}</span>` : ""}
             <span class="log-sub">${log.sets.length}세트 · ${formatSetsSummary(log.sets)}</span>
             <span class="log-sub">볼륨 ${Math.round(volume)}kg · 칼로리 ${Math.round(calories)}kcal</span>
           </div>`;
@@ -1246,6 +1257,7 @@ async function applyRoutine(routineId) {
     const equipment = currentEquipment.find((eq) => eq.id === ex.equipmentId);
     const equipmentName = equipment ? equipment.name : ex.equipmentName;
     const category = equipment ? equipment.category : ex.category || "";
+    const manufacturer = equipment ? equipment.manufacturer || "" : "";
     const sortOrder = await getBottomSortOrder();
     const log = {
       date: todayStr(),
@@ -1253,6 +1265,7 @@ async function applyRoutine(routineId) {
       equipmentId: ex.equipmentId,
       equipmentName,
       category,
+      manufacturer,
       sets: ex.sets.map((s) => ({ ...s })),
       sortOrder,
       createdAt: Date.now(),
@@ -1671,6 +1684,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
       equipmentId: equipment.id,
       equipmentName: equipment.name,
       category: equipment.category,
+      manufacturer: equipment.manufacturer || "",
       sets: currentSets.map((s) => ({ ...s })),
     };
     await db.updateWorkoutLog(editingLogId, updated);
@@ -1689,6 +1703,7 @@ $("#btn-finish-weight").addEventListener("click", async () => {
     equipmentId: equipment.id,
     equipmentName: equipment.name,
     category: equipment.category,
+    manufacturer: equipment.manufacturer || "",
     sets: currentSets.map((s) => ({ ...s })),
     sortOrder: await getBottomSortOrder(),
     createdAt: Date.now(),
