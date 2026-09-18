@@ -560,8 +560,9 @@ input[type="range"] {
   margin: 4px 0 10px;
 }
 
-.checkbox-label {
+label.checkbox-label {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 6px;
   font-size: 13px;
@@ -569,6 +570,13 @@ input[type="range"] {
 }
 .checkbox-label input[type="checkbox"] {
   width: auto;
+}
+
+.assist-hint {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mint);
+  margin-left: 4px;
 }
 
 .equipment-thumb {

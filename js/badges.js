@@ -242,39 +242,52 @@ function toKg(set) {
   return set.unit === "lb" ? set.weight * LB_TO_KG : set.weight;
 }
 
-const CALORIES_PER_KG_VOLUME = 0.05;
 const DEFAULT_BODY_WEIGHT_KG = 70;
 
-function calcLogVolume(log) {
-  if (log.type !== "weight") return 0;
-  return log.sets.filter((s) => s.unit !== "none").reduce((sum, s) => sum + toKg(s) * s.reps, 0);
+function normalizeCategory(cat) {
+  return (cat || "").trim().toLowerCase();
 }
-function calcCaloriesFromVolume(volume, bodyWeightKg) {
-  return volume * CALORIES_PER_KG_VOLUME * (bodyWeightKg / DEFAULT_BODY_WEIGHT_KG);
+function normalizeEquipmentName(name) {
+  return (name || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-const BODYWEIGHT_MET_RULES = [
-  { keywords: ["레그레이즈", "레그 레이즈"], met: 3.5 },
-  { keywords: ["플랭크"], met: 3.0 },
-  { keywords: ["크런치", "싯업"], met: 3.8 },
-  { keywords: ["딥스"], met: 5.0 },
-  { keywords: ["풀업", "친업"], met: 6.0 },
-  { keywords: ["푸시업"], met: 3.8 },
-  { keywords: ["런지"], met: 4.0 },
-  { keywords: ["스쿼트"], met: 5.0 },
-];
-const DEFAULT_BODYWEIGHT_MET = 3.5;
-function getBodyweightMET(equipmentName) {
-  const rule = BODYWEIGHT_MET_RULES.find((r) => r.keywords.some((kw) => (equipmentName || "").includes(kw)));
-  return rule ? rule.met : DEFAULT_BODYWEIGHT_MET;
+/* 기구 카테고리별 웨이트 운동 MET (app.js와 동일한 값의 로컬 사본) */
+const WEIGHT_CATEGORY_MET = { 하체: 6.0, 등: 5.0, 가슴: 5.0, 어깨: 4.0, 팔: 3.5, 복근: 3.5 };
+const DEFAULT_WEIGHT_MET = 4.0; // 기타/미분류
+function getWeightCategoryMET(category) {
+  const normalized = normalizeCategory(category);
+  const entry = Object.entries(WEIGHT_CATEGORY_MET).find(([k]) => normalizeCategory(k) === normalized);
+  return entry ? entry[1] : DEFAULT_WEIGHT_MET;
 }
-function calcBodyweightSetsCalories(log, bodyWeightKg) {
-  const noneSetCount = log.sets.filter((s) => s.unit === "none").length;
-  if (!noneSetCount) return 0;
-  return getBodyweightMET(log.equipmentName) * bodyWeightKg * ((noneSetCount * 1) / 60);
+
+/* resolves the equipment currently backing a log (id first, normalized-name
+   fallback) so calorie/volume math reflects the equipment's current
+   category/isAssist rather than whatever was true when the log was saved */
+function makeEquipmentResolver(equipmentList) {
+  const byId = new Map(equipmentList.map((eq) => [eq.id, eq]));
+  const byName = new Map(equipmentList.map((eq) => [normalizeEquipmentName(eq.name), eq]));
+  return (log) => {
+    if (log.equipmentId != null && byId.has(log.equipmentId)) return byId.get(log.equipmentId);
+    return byName.get(normalizeEquipmentName(log.equipmentName)) || null;
+  };
 }
-function calcWeightLogCalories(log, bodyWeightKg) {
-  return calcCaloriesFromVolume(calcLogVolume(log), bodyWeightKg) + calcBodyweightSetsCalories(log, bodyWeightKg);
+
+/* assist machines: the entered weight is the assist/support amount, not the
+   load lifted, so the real load is body weight minus that assist amount */
+function calcLogVolume(log, bodyWeightKg, eq) {
+  if (log.type !== "weight") return 0;
+  const isAssist = eq?.isAssist === true;
+  return log.sets
+    .filter((s) => s.unit !== "none")
+    .reduce((sum, s) => {
+      const rawKg = toKg(s);
+      const kg = isAssist ? Math.max(bodyWeightKg - rawKg, 0) : rawKg;
+      return sum + kg * s.reps;
+    }, 0);
+}
+function calcWeightLogCalories(log, bodyWeightKg, eq) {
+  const met = getWeightCategoryMET(eq?.category ?? log.category);
+  return met * bodyWeightKg * ((log.sets.length * 1) / 60);
 }
 
 function getRunningMET(pace) {
@@ -296,8 +309,8 @@ function calcStairmasterCalories(log, bodyWeightKg) {
   return getStairmasterMET(log.level) * bodyWeightKg * (log.duration / 3600);
 }
 
-function calcLogCalories(log, bodyWeightKg) {
-  if (log.type === "weight") return calcWeightLogCalories(log, bodyWeightKg);
+function calcLogCalories(log, bodyWeightKg, eq) {
+  if (log.type === "weight") return calcWeightLogCalories(log, bodyWeightKg, eq);
   if (log.type === "running") return calcRunningCalories(log, bodyWeightKg);
   if (log.type === "stairmaster") return calcStairmasterCalories(log, bodyWeightKg);
   return 0;
@@ -563,7 +576,8 @@ function seasonOf(dateStr) {
 }
 
 /* ---------------- 데이터 준비 ---------------- */
-function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals }) {
+function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals, equipmentList }) {
+  const resolveEquipment = makeEquipmentResolver(equipmentList || []);
   const weightLogs = workoutLogs.filter((l) => l.type === "weight").slice().sort(byDateThenId);
   const runningLogs = workoutLogs.filter((l) => l.type === "running").slice().sort(byDateThenId);
   const stairLogs = workoutLogs.filter((l) => l.type === "stairmaster").slice().sort(byDateThenId);
@@ -656,7 +670,7 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals
   const totalSetCountPoints = computeCumulativePoints(weightLogs, (l) => l.sets.length);
   const noneSetCumulative = computeCumulativePoints(weightLogs, (l) => l.sets.filter((s) => s.unit === "none").length);
   const dailySetTotals = computeDailyTotals(weightLogs, (l) => l.sets.length);
-  const dailyVolumeTotals = computeDailyTotals(weightLogs, (l) => calcLogVolume(l));
+  const dailyVolumeTotals = computeDailyTotals(weightLogs, (l) => calcLogVolume(l, bodyWeightKg, resolveEquipment(l)));
   const distinctEquipmentPoints = computeDistinctCumulative(weightLogs, (l) => l.equipmentName);
 
   let allInDate = null;
@@ -676,7 +690,9 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals
 
   const dailyStreakPoints = computeStreakAchievements(allWorkoutDatesSorted);
   const streak7Completions = countStreakCompletions(dailyStreakPoints, 7);
-  const monthlyCalorieTotals = computeMonthlyResetTotals(allLogsSorted, (l) => calcLogCalories(l, bodyWeightKg));
+  const monthlyCalorieTotals = computeMonthlyResetTotals(allLogsSorted, (l) =>
+    calcLogCalories(l, bodyWeightKg, l.type === "weight" ? resolveEquipment(l) : null)
+  );
 
   let muscleEvangelistDate = null;
   if (inbodySorted.length >= 2) {
@@ -842,8 +858,10 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals
     noDrinkStreak: computeStreakAchievements(nodrinkDatesSorted),
     workoutAndProteinSameDayDates: proteinDatesSorted.filter((d) => workoutDateSet.has(d)).sort(),
 
-    cumulativeVolume: computeCumulativePoints(weightLogs, (l) => calcLogVolume(l)),
-    cumulativeCalories: computeCumulativePoints(allLogsSorted, (l) => calcLogCalories(l, bodyWeightKg)),
+    cumulativeVolume: computeCumulativePoints(weightLogs, (l) => calcLogVolume(l, bodyWeightKg, resolveEquipment(l))),
+    cumulativeCalories: computeCumulativePoints(allLogsSorted, (l) =>
+      calcLogCalories(l, bodyWeightKg, l.type === "weight" ? resolveEquipment(l) : null)
+    ),
 
     /* 신규 */
     dawnLog,
@@ -1926,15 +1944,16 @@ function buildBadges(data) {
 
 /* ---------------- 엔트리 포인트 ---------------- */
 export async function evaluateAllBadges() {
-  const [workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals] = await Promise.all([
+  const [workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals, equipmentList] = await Promise.all([
     db.getAllWorkoutLogs(),
     db.getAllInbodyRecords(),
     db.getAllDrinkLogs(),
     db.getRoutines(),
     db.getAllWorkoutMemos(),
     db.getSetting("fitnessGoals", null),
+    db.getEquipmentList(),
   ]);
-  const data = prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals });
+  const data = prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals, equipmentList });
   const list = buildBadges(data);
 
   // "전설의 시작"은 다른 149개 뱃지 중 50개를 달성한 시점을 가리키는 메타 뱃지

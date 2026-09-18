@@ -335,6 +335,7 @@
               <option value="유산소">유산소</option>
             </select>
           </label>
+          <label class="checkbox-label"><input type="checkbox" id="equipment-is-assist" /> 어시스트 운동 (보조 무게로 계산)</label>
           <label>메모<input type="text" id="equipment-memo" placeholder="예: 창가 쪽, 최대 120kg" /></label>
           <div class="photo-field">
             <div class="btn-row">
@@ -481,7 +482,7 @@
             <button type="button" class="segmented-btn" data-unit="lb">lb</button>
             <button type="button" class="segmented-btn" data-unit="none">무게없음</button>
           </div>
-          <label id="set-weight-label">무게<input type="number" step="0.5" id="set-weight" /></label>
+          <label id="set-weight-label">무게<span id="set-weight-assist-hint" class="assist-hint" hidden>(보조 무게)</span><input type="number" step="0.5" id="set-weight" /></label>
           <label>횟수<input type="number" id="set-reps" min="1" /></label>
           <div class="btn-row">
             <button type="button" class="btn btn-ghost" id="btn-cancel-set-edit" hidden>취소</button>
@@ -554,6 +555,7 @@
           <option value="유산소">유산소</option>
         </select>
       </label>
+      <label class="checkbox-label"><input type="checkbox" id="edit-equipment-is-assist" /> 어시스트 운동 (보조 무게로 계산)</label>
       <label>메모<input type="text" id="edit-equipment-memo" placeholder="예: 창가 쪽, 최대 120kg" /></label>
       <div class="photo-field">
         <div class="btn-row">

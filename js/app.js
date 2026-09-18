@@ -28,13 +28,13 @@ function todayStr() {
   return formatDate(new Date());
 }
 
-function formatSet(set) {
+function formatSet(set, assistSuffix = "") {
   if (set.unit === "none") return `무게없음 × ${set.reps}회`;
-  return `${set.weight}${set.unit} × ${set.reps}회`;
+  return `${set.weight}${set.unit}${assistSuffix} × ${set.reps}회`;
 }
 
-function formatSetsSummary(sets) {
-  return sets.map(formatSet).join(", ");
+function formatSetsSummary(sets, assistSuffix = "") {
+  return sets.map((s) => formatSet(s, assistSuffix)).join(", ");
 }
 
 function showToast(msg, ms = 2200) {
@@ -137,7 +137,8 @@ function getMondayOfWeek(date) {
 }
 
 async function renderHomeCalorieStats() {
-  const bodyWeightKg = await getLatestBodyWeightKg();
+  const [bodyWeightKg, equipmentList] = await Promise.all([getLatestBodyWeightKg(), db.getEquipmentList()]);
+  const resolveEquipment = makeEquipmentResolver(equipmentList);
   const now = new Date();
   const todayString = formatDate(now);
 
@@ -154,7 +155,8 @@ async function renderHomeCalorieStats() {
     db.getWorkoutLogsBetween(formatDate(monthStart), formatDate(monthEndExclusive)),
   ]);
 
-  const sumCalories = (logs) => logs.reduce((sum, log) => sum + calcLogCalories(log, bodyWeightKg), 0);
+  const sumCalories = (logs) =>
+    logs.reduce((sum, log) => sum + calcLogCalories(log, bodyWeightKg, log.type === "weight" ? resolveEquipment(log) : null), 0);
 
   $("#home-calorie-stats").innerHTML = `
     <div class="calorie-stat-item"><span>일간</span><span>${Math.round(sumCalories(todayLogs))}kcal</span></div>
@@ -756,13 +758,15 @@ $$(".pill", $("#stats-category-tabs")).forEach((btn) => {
 async function openEquipmentLogDetail(logId) {
   const log = allWorkoutLogsById.get(logId);
   if (!log) return;
-  const bodyWeightKg = await getLatestBodyWeightKg();
-  const volume = calcLogVolume(log);
-  const calories = calcWeightLogCalories(log, bodyWeightKg);
+  const [bodyWeightKg, equipmentList] = await Promise.all([getLatestBodyWeightKg(), db.getEquipmentList()]);
+  const eq = makeEquipmentResolver(equipmentList)(log);
+  const isAssist = eq?.isAssist === true;
+  const volume = calcLogVolume(log, bodyWeightKg, eq);
+  const calories = calcWeightLogCalories(log, bodyWeightKg, eq);
   $("#equipment-log-detail-title").textContent = `${log.equipmentName} · ${log.date}`;
   $("#equipment-log-detail-content").innerHTML = `
     <div class="log-table-detail">
-      ${log.sets.map((s, i) => `<div>세트${i + 1}: ${formatSet(s)}</div>`).join("")}
+      ${log.sets.map((s, i) => `<div>세트${i + 1}: ${formatSet(s, isAssist ? " 보조" : "")}</div>`).join("")}
     </div>
     <div class="log-table-detail-totals">
       <div>총 볼륨: ${Math.round(volume)}kg</div>
@@ -775,50 +779,59 @@ $("#btn-close-equipment-log-detail").addEventListener("click", () => {
   $("#modal-equipment-log-detail").hidden = true;
 });
 
-/* estimated calories: strength training uses total volume(kg) x 0.05 x (body weight / 70),
+/* estimated calories: strength training uses category MET x body weight(kg) x
+   (set count x 1분) / 60 (every set counts equally, weighted or bodyweight),
    running uses MET x body weight(kg) x time(hours), with MET derived from pace(분/km) */
-const CALORIES_PER_KG_VOLUME = 0.05;
 const DEFAULT_BODY_WEIGHT_KG = 70;
 
-function calcLogVolume(log) {
+/* 기구 카테고리별 웨이트 운동 MET */
+const WEIGHT_CATEGORY_MET = {
+  하체: 6.0,
+  등: 5.0,
+  가슴: 5.0,
+  어깨: 4.0,
+  팔: 3.5,
+  복근: 3.5,
+};
+const DEFAULT_WEIGHT_MET = 4.0; // 기타/미분류
+
+function getWeightCategoryMET(category) {
+  const normalized = normalizeCategory(category);
+  const entry = Object.entries(WEIGHT_CATEGORY_MET).find(([k]) => normalizeCategory(k) === normalized);
+  return entry ? entry[1] : DEFAULT_WEIGHT_MET;
+}
+
+/* resolves the equipment currently backing a log the same way the stats
+   charts do (id first, normalized-name fallback) — so calorie/volume math
+   always reflects the equipment's current category/isAssist rather than
+   whatever was snapshotted onto the log when it was saved */
+function makeEquipmentResolver(equipmentList) {
+  const byId = new Map(equipmentList.map((eq) => [eq.id, eq]));
+  const byName = new Map(equipmentList.map((eq) => [normalizeEquipmentName(eq.name), eq]));
+  return (log) => {
+    if (log.equipmentId != null && byId.has(log.equipmentId)) return byId.get(log.equipmentId);
+    return byName.get(normalizeEquipmentName(log.equipmentName)) || null;
+  };
+}
+
+/* assist machines (adjustable-support pull-up/dip stations etc.): the entered
+   weight is the assist/support amount, not the load lifted, so the real load
+   is body weight minus that assist amount */
+function calcLogVolume(log, bodyWeightKg, eq) {
   if (log.type !== "weight") return 0;
+  const isAssist = eq?.isAssist === true;
   return log.sets
     .filter((s) => s.unit !== "none")
-    .reduce((sum, s) => sum + toKg(s) * s.reps, 0);
+    .reduce((sum, s) => {
+      const rawKg = toKg(s);
+      const kg = isAssist ? Math.max(bodyWeightKg - rawKg, 0) : rawKg;
+      return sum + kg * s.reps;
+    }, 0);
 }
 
-function calcCaloriesFromVolume(volume, bodyWeightKg) {
-  return volume * CALORIES_PER_KG_VOLUME * (bodyWeightKg / DEFAULT_BODY_WEIGHT_KG);
-}
-
-/* bodyweight (unit: "none") sets: MET x body weight(kg) x (set count x 1분) / 60,
-   MET looked up by whether the equipment name contains a known exercise keyword */
-const BODYWEIGHT_MET_RULES = [
-  { keywords: ["레그레이즈", "레그 레이즈"], met: 3.5 },
-  { keywords: ["플랭크"], met: 3.0 },
-  { keywords: ["크런치", "싯업"], met: 3.8 },
-  { keywords: ["딥스"], met: 5.0 },
-  { keywords: ["풀업", "친업"], met: 6.0 },
-  { keywords: ["푸시업"], met: 3.8 },
-  { keywords: ["런지"], met: 4.0 },
-  { keywords: ["스쿼트"], met: 5.0 },
-];
-const DEFAULT_BODYWEIGHT_MET = 3.5;
-
-function getBodyweightMET(equipmentName) {
-  const rule = BODYWEIGHT_MET_RULES.find((r) => r.keywords.some((kw) => equipmentName.includes(kw)));
-  return rule ? rule.met : DEFAULT_BODYWEIGHT_MET;
-}
-
-function calcBodyweightSetsCalories(log, bodyWeightKg) {
-  const noneSetCount = log.sets.filter((s) => s.unit === "none").length;
-  if (!noneSetCount) return 0;
-  const met = getBodyweightMET(log.equipmentName);
-  return met * bodyWeightKg * ((noneSetCount * 1) / 60);
-}
-
-function calcWeightLogCalories(log, bodyWeightKg) {
-  return calcCaloriesFromVolume(calcLogVolume(log), bodyWeightKg) + calcBodyweightSetsCalories(log, bodyWeightKg);
+function calcWeightLogCalories(log, bodyWeightKg, eq) {
+  const met = getWeightCategoryMET(eq?.category ?? log.category);
+  return met * bodyWeightKg * ((log.sets.length * 1) / 60);
 }
 
 async function getLatestBodyWeightKg() {
@@ -865,8 +878,8 @@ function calcStairmasterCalories(log, bodyWeightKg) {
   return met * bodyWeightKg * hours;
 }
 
-function calcLogCalories(log, bodyWeightKg) {
-  if (log.type === "weight") return calcWeightLogCalories(log, bodyWeightKg);
+function calcLogCalories(log, bodyWeightKg, eq) {
+  if (log.type === "weight") return calcWeightLogCalories(log, bodyWeightKg, eq);
   if (log.type === "running") return calcRunningCalories(log, bodyWeightKg);
   if (log.type === "stairmaster") return calcStairmasterCalories(log, bodyWeightKg);
   return 0;
@@ -975,6 +988,7 @@ async function renderWorkoutLogList(logs) {
   let totalVolume = 0;
   let totalCalories = 0;
   const bodyWeightKg = await getLatestBodyWeightKg();
+  const resolveEquipment = makeEquipmentResolver(equipmentCache);
 
   const ordered = sortWorkoutLogsForDisplay(logs);
 
@@ -983,8 +997,10 @@ async function renderWorkoutLogList(logs) {
       div.className = "log-item";
       let mainHtml = "";
       if (log.type === "weight") {
-        const volume = calcLogVolume(log);
-        const calories = calcWeightLogCalories(log, bodyWeightKg);
+        const eq = resolveEquipment(log);
+        const isAssist = eq?.isAssist === true;
+        const volume = calcLogVolume(log, bodyWeightKg, eq);
+        const calories = calcWeightLogCalories(log, bodyWeightKg, eq);
         totalVolume += volume;
         totalCalories += calories;
         const manufacturer = getWorkoutLogManufacturer(log);
@@ -992,7 +1008,7 @@ async function renderWorkoutLogList(logs) {
           <div class="log-main">
             <span class="log-title">${log.equipmentName}</span>
             ${manufacturer ? `<span class="log-manufacturer">${manufacturer}</span>` : ""}
-            <span class="log-sub">${log.sets.length}세트 · ${formatSetsSummary(log.sets)}</span>
+            <span class="log-sub">${log.sets.length}세트 · ${formatSetsSummary(log.sets, isAssist ? " (어시스트)" : "")}</span>
             <span class="log-sub">볼륨 ${Math.round(volume)}kg · 칼로리 ${Math.round(calories)}kcal</span>
           </div>`;
       } else if (log.type === "running") {
@@ -1346,6 +1362,7 @@ async function updateWeightFormMode() {
   const stairmaster = isStairmasterSelected();
   $("#weight-set-section").hidden = stairmaster;
   $("#stairmaster-section").hidden = !stairmaster;
+  $("#set-weight-assist-hint").hidden = stairmaster || !isSelectedEquipmentAssist();
   if (stairmaster) {
     stairmasterBodyWeightKg = await getLatestBodyWeightKg();
     updateStairmasterCaloriePreview();
@@ -1354,6 +1371,7 @@ async function updateWeightFormMode() {
   } else {
     await updatePreviousRecordInfo();
   }
+  renderSetList();
 }
 
 /* previous-record lookup: shows the most recent log for the selected equipment
@@ -1383,9 +1401,10 @@ async function updatePreviousRecordInfo() {
   }
 
   pendingPreviousRecordSets = mostRecent.sets;
+  const assistSuffix = equipment.isAssist === true ? " 보조" : "";
   $("#previous-record-date-value").textContent = mostRecent.date;
   $("#previous-record-sets").innerHTML = mostRecent.sets
-    .map((s, i) => `<div>세트${i + 1}: ${formatSet(s)}</div>`)
+    .map((s, i) => `<div>세트${i + 1}: ${formatSet(s, assistSuffix)}</div>`)
     .join("");
   container.hidden = false;
 }
@@ -1436,16 +1455,22 @@ function updateEquipmentLock() {
   $("#weight-equipment").disabled = currentSets.length > 0;
 }
 
+function isSelectedEquipmentAssist() {
+  const equipmentId = Number($("#weight-equipment").value);
+  return equipmentCache.find((eq) => eq.id === equipmentId)?.isAssist === true;
+}
+
 function renderSetList() {
   const container = $("#set-list");
   container.innerHTML = "";
+  const assistSuffix = isSelectedEquipmentAssist() ? " 보조" : "";
   currentSets.forEach((set, i) => {
     const div = document.createElement("div");
     div.className = "log-item";
     div.innerHTML = `
       <div class="log-main">
         <span class="log-title">세트 ${i + 1}</span>
-        <span class="log-sub">${formatSet(set)}</span>
+        <span class="log-sub">${formatSet(set, assistSuffix)}</span>
       </div>
       <div class="set-item-actions">
         <button type="button" class="btn btn-ghost btn-sm set-copy" data-index="${i}">복사</button>
@@ -1588,6 +1613,7 @@ async function startEditWorkoutLog(log) {
   resetPreviousRecordInfo();
   $("#stairmaster-section").hidden = true;
   $("#weight-set-section").hidden = false;
+  $("#set-weight-assist-hint").hidden = !isSelectedEquipmentAssist();
   currentSets = log.sets.map((s) => ({ ...s }));
   exitSetEditMode();
   $("#set-entry").hidden = true;
@@ -3133,6 +3159,7 @@ function openEditEquipmentModal(id) {
   $("#edit-equipment-name").value = eq.name;
   $("#edit-equipment-manufacturer").value = eq.manufacturer || "";
   $("#edit-equipment-category").value = eq.category;
+  $("#edit-equipment-is-assist").checked = eq.isAssist === true;
   $("#edit-equipment-memo").value = eq.memo || "";
 
   const preview = $("#edit-equipment-photo-preview");
@@ -3189,11 +3216,12 @@ $("#form-edit-equipment").addEventListener("submit", async (e) => {
   if (!name) return;
   const manufacturer = $("#edit-equipment-manufacturer").value.trim();
   const category = $("#edit-equipment-category").value;
+  const isAssist = $("#edit-equipment-is-assist").checked;
   const memo = $("#edit-equipment-memo").value.trim();
   const existing = settingsEquipmentCache.find((eItem) => eItem.id === editingEquipmentId);
   const photo = pendingEditPhoto !== undefined ? pendingEditPhoto : existing?.photo ?? null;
 
-  await db.updateEquipment(editingEquipmentId, { name, manufacturer, category, memo, photo });
+  await db.updateEquipment(editingEquipmentId, { name, manufacturer, category, isAssist, memo, photo });
   if (existing) {
     await db.renameEquipmentInWorkoutLogs(editingEquipmentId, existing.name, name);
     await db.renameEquipmentInRoutines(editingEquipmentId, existing.name, name);
@@ -3243,9 +3271,10 @@ $("#equipment-form").addEventListener("submit", async (e) => {
   const name = $("#equipment-name").value.trim();
   const manufacturer = $("#equipment-manufacturer").value.trim();
   const category = $("#equipment-category").value;
+  const isAssist = $("#equipment-is-assist").checked;
   const memo = $("#equipment-memo").value.trim();
   if (!name) return;
-  await db.addEquipment({ name, manufacturer, category, memo, photo: pendingAddPhoto });
+  await db.addEquipment({ name, manufacturer, category, isAssist, memo, photo: pendingAddPhoto });
   $("#equipment-form").reset();
   pendingAddPhoto = null;
   $("#equipment-photo-preview").hidden = true;
