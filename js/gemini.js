@@ -104,16 +104,39 @@ function stripCodeFence(text) {
   return (fenced ? fenced[1] : text).trim();
 }
 
-const VISION_PROMPT = `이 Apple Fitness 운동 기록 이미지들에서 다음 데이터를 추출해서 JSON으로만 반환해줘.
-다른 텍스트 없이 JSON만:
+const VISION_PROMPT = `이 Apple Fitness 운동 기록 이미지들을 분석해서 아래 JSON 형식으로만 반환해줘.
+다른 텍스트나 마크다운 없이 순수 JSON만.
+단위는 숫자만 저장 (예: 5.01, 33, 6.73, 163, 239, 153, 19, 421, 489)
+문자열 단위(km, 분, BPM, W, SPM, m, KCAL) 절대 포함하지 말 것.
+페이스는 '분:초' 형태 문자열로 (예: '6:44').
+
 {
-  "date": null, "location": null, "duration": null, "elapsed_time": null,
-  "distance_km": null, "active_calories": null, "total_calories": null,
-  "avg_pace": null, "avg_heart_rate": null, "avg_power": null, "avg_cadence": null,
-  "intensity_level": null, "intensity_text": null, "elevation_gain": null,
-  "heart_rate_zones": [{ "zone": 1, "duration": null, "bpm_range": null }],
-  "splits": [{ "km": 1, "time": null, "pace": null, "heart_rate": null, "power": null }]
+  date: '9월 7일' 형태 문자열,
+  location: string,
+  duration_min: number (운동시간, 분 단위 소수점),
+  elapsed_min: number (경과시간, 분 단위),
+  distance_km: number,
+  active_calories: number,
+  total_calories: number,
+  avg_pace: string ('분:초' 형태),
+  avg_heart_rate: number,
+  avg_power: number,
+  avg_cadence: number,
+  intensity_level: number,
+  intensity_text: string,
+  elevation_gain: number,
+  heart_rate_zones: [
+    {zone: 1, duration_sec: number, bpm_range: '<135'},
+    {zone: 2, duration_sec: number, bpm_range: '136~147'},
+    {zone: 3, duration_sec: number, bpm_range: '148~159'},
+    {zone: 4, duration_sec: number, bpm_range: '160~171'},
+    {zone: 5, duration_sec: number, bpm_range: '172+'}
+  ],
+  splits: [
+    {km: number, time: string, pace: string, heart_rate: number, power: number}
+  ]
 }
+
 값을 이미지에서 찾을 수 없으면 null로 둬. 여러 이미지에 걸쳐 있는 정보(요약, 스플릿, 심박수 영역 등)를 모두 종합해서 하나의 JSON으로 합쳐줘.`;
 
 /**
@@ -198,12 +221,12 @@ export async function generateRunningComment(apiKey, { run, previousRun, bodyWei
 2. 잘한 점
 3. 개선할 점
 4. 다음 훈련 추천
-최대 300자로 간결하게. 다른 설명 없이 본문만 답변해.
+최대 500자로 간결하게. 다른 설명 없이 본문만 답변해.
 
 [이번 러닝] ${runText}
 [이전 러닝] ${prevText}
 [체중] ${fmt(bodyWeightKg, "kg")}
 [목표] ${goalsText}`;
 
-  return callGemini(apiKey, [{ text: prompt }], { temperature: 0.6, maxOutputTokens: 512, onRetry });
+  return callGemini(apiKey, [{ text: prompt }], { temperature: 0.6, maxOutputTokens: 2048, onRetry });
 }

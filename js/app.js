@@ -7,7 +7,6 @@ import {
   attachChartClickHandler,
   formatPaceLabel,
   parsePaceLabel,
-  parseMinutesSeconds,
   HR_ZONE_COLORS,
 } from "./chart.js";
 import { evaluateAllBadges, renderBadgeIconSvg, formatProgressText, BADGE_CATEGORIES } from "./badges.js";
@@ -1797,31 +1796,13 @@ $("#btn-manual-running-entry").addEventListener("click", () => {
   $("#running-form-actions").hidden = false;
 });
 
-/* "32:15" / "0:32:15" / "32분 15초" / "32분" -> 32.25 (decimal minutes) */
-function parseDurationToMinutes(text) {
-  if (text == null || text === "") return null;
-  const str = String(text).trim();
-
-  const colon = str.match(/^(\d+):(\d+)(?::(\d+))?$/);
-  if (colon) {
-    if (colon[3] != null) {
-      return Number(colon[1]) * 60 + Number(colon[2]) + Number(colon[3]) / 60;
-    }
-    return Number(colon[1]) + Number(colon[2]) / 60;
-  }
-
-  const hourMatch = str.match(/(\d+)\s*시간/);
-  const minMatch = str.match(/(\d+)\s*분/);
-  const secMatch = str.match(/(\d+)\s*초/);
-  if (hourMatch || minMatch || secMatch) {
-    const h = hourMatch ? Number(hourMatch[1]) : 0;
-    const m = minMatch ? Number(minMatch[1]) : 0;
-    const s = secMatch ? Number(secMatch[1]) : 0;
-    return h * 60 + m + s / 60;
-  }
-
-  const num = Number(str);
-  return isFinite(num) && str !== "" ? num : null;
+/* seconds -> "11분 41초" */
+function formatSecondsToMinSec(totalSeconds) {
+  const sec = Number(totalSeconds);
+  if (!isFinite(sec)) return "-";
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}분 ${s}초`;
 }
 
 /* "9월 7일" / "2026년 9월 7일" / "2026-09-07" -> "2026-09-07" (assumes the
@@ -1847,7 +1828,7 @@ function buildRunningExtraFields(pending) {
   if (!pending) return {};
   return {
     location: pending.location ?? null,
-    elapsed_time: pending.elapsed_time ?? null,
+    elapsed_min: pending.elapsed_min ?? null,
     active_calories: pending.active_calories ?? null,
     total_calories: pending.total_calories ?? null,
     avg_heart_rate: pending.avg_heart_rate ?? null,
@@ -1869,34 +1850,56 @@ function buildRunningExtraFields(pending) {
  * intensity_text/heart_rate_zones/splits), plus an already-formatted
  * calories line so each caller can phrase it its own way.
  */
+function buildRunSummaryCard(icon, label, value) {
+  if (value == null || value === "") return "";
+  return `<div class="run-summary-card"><div class="run-summary-label">${icon} ${label}</div><div class="run-summary-value">${value}</div></div>`;
+}
+
 function buildRunningSummaryZonesSplitsHtml(data, caloriesText) {
+  const summaryItems = [
+    buildRunSummaryCard("🏃", "거리", data.distance != null ? `${data.distance}km` : null),
+    buildRunSummaryCard("⏱️", "시간", data.duration != null ? `${data.duration}분` : null),
+    buildRunSummaryCard("💨", "페이스", data.pace != null ? `${formatPaceLabel(data.pace)}/km` : null),
+    buildRunSummaryCard("❤️", "심박수", data.avg_heart_rate != null ? `${data.avg_heart_rate}BPM` : null),
+    buildRunSummaryCard("⚡", "파워", data.avg_power != null ? `${data.avg_power}W` : null),
+    buildRunSummaryCard("👟", "케이던스", data.avg_cadence != null ? `${data.avg_cadence}SPM` : null),
+    buildRunSummaryCard("🔥", "칼로리", caloriesText),
+    buildRunSummaryCard("⛰️", "고도", data.elevation_gain != null ? `${data.elevation_gain}m` : null),
+    buildRunSummaryCard("💪", "강도", data.intensity_text ? `${data.intensity_level ?? ""} ${data.intensity_text}`.trim() : null),
+    buildRunSummaryCard("📍", "장소", data.location || null),
+  ]
+    .filter(Boolean)
+    .join("");
+
   const summaryHtml = `
     <div class="running-detail-section">
       <h3>요약</h3>
-      <div class="log-table-detail">
-        ${data.distance != null ? `<div>거리: ${data.distance}km</div>` : ""}
-        ${data.duration != null ? `<div>시간: ${data.duration}분</div>` : ""}
-        ${data.pace != null ? `<div>페이스: ${formatPaceLabel(data.pace)}/km</div>` : ""}
-        ${data.location ? `<div>장소: ${data.location}</div>` : ""}
-        ${data.avg_heart_rate != null ? `<div>평균 심박수: ${data.avg_heart_rate}bpm</div>` : ""}
-        ${data.avg_power != null ? `<div>평균 파워: ${data.avg_power}W</div>` : ""}
-        ${data.avg_cadence != null ? `<div>평균 케이던스: ${data.avg_cadence}spm</div>` : ""}
-        ${data.elevation_gain != null ? `<div>등반고도: ${data.elevation_gain}m</div>` : ""}
-        ${data.intensity_text ? `<div>운동강도: ${data.intensity_level ?? ""} ${data.intensity_text}</div>` : ""}
-        ${caloriesText ? `<div>칼로리: ${caloriesText}</div>` : ""}
-      </div>
+      <div class="run-summary-grid">${summaryItems}</div>
     </div>`;
 
   const zonesHtml =
     Array.isArray(data.heart_rate_zones) && data.heart_rate_zones.length
-      ? `<div class="running-detail-section"><h3>심박수 영역</h3>${data.heart_rate_zones
-          .map(
-            (z) =>
-              `<div class="hr-zone-row"><span class="hr-zone-dot" style="background:${
-                HR_ZONE_COLORS[z.zone] || "#888"
-              }"></span>영역${z.zone} · ${z.duration ?? "-"}${z.bpm_range ? ` (${z.bpm_range})` : ""}</div>`
-          )
-          .join("")}</div>`
+      ? (() => {
+          const totalSec = data.heart_rate_zones.reduce((sum, z) => sum + (Number(z.duration_sec) || 0), 0) || 1;
+          const rows = data.heart_rate_zones
+            .map((z) => {
+              const sec = Number(z.duration_sec) || 0;
+              const pct = Math.round((sec / totalSec) * 100);
+              const color = HR_ZONE_COLORS[z.zone] || "#888";
+              return `
+                <div class="hr-zone-bar-row">
+                  <div class="hr-zone-bar-header">
+                    <span>영역${z.zone}${z.bpm_range ? ` ${z.bpm_range}BPM` : ""}</span>
+                    <span>${formatSecondsToMinSec(sec)}</span>
+                  </div>
+                  <div class="hr-zone-bar-track">
+                    <div class="hr-zone-bar-fill" style="width:${pct}%;background:${color}"></div>
+                  </div>
+                </div>`;
+            })
+            .join("");
+          return `<div class="running-detail-section"><h3>심박수 영역</h3>${rows}</div>`;
+        })()
       : "";
 
   const splitsHtml =
@@ -1969,8 +1972,8 @@ function applyFitnessImportResult(parsed) {
   if (importedDate) resetWorkoutDateInput(importedDate);
 
   if (parsed.distance_km != null) $("#running-distance").value = parsed.distance_km;
-  const minutes = parseDurationToMinutes(parsed.duration ?? parsed.elapsed_time);
-  if (minutes != null) $("#running-duration").value = Math.round(minutes * 10) / 10;
+  const minutes = parsed.duration_min ?? parsed.elapsed_min ?? null;
+  if (minutes != null) $("#running-duration").value = Math.round(Number(minutes) * 10) / 10;
   updateRunningPacePreview();
 
   $("#running-manual-fields").hidden = false;
@@ -2115,7 +2118,17 @@ $("#form-running").addEventListener("submit", async (e) => {
   const commentField = hadComment ? { geminiComment: pendingRunningComment } : {};
 
   if (editingLogId != null) {
-    const updated = { ...editingLogSnapshot, type: "running", date, distance, duration, pace, ...extraFields, ...commentField };
+    const updated = {
+      ...editingLogSnapshot,
+      type: "running",
+      date,
+      distance,
+      duration,
+      pace,
+      ...extraFields,
+      calories: extraFields.active_calories ?? editingLogSnapshot.calories ?? null,
+      ...commentField,
+    };
     await db.updateWorkoutLog(editingLogId, updated);
     closeAddWorkoutModal();
     const logs = await db.getWorkoutLogsByDate(todayStr());
@@ -2134,6 +2147,7 @@ $("#form-running").addEventListener("submit", async (e) => {
     duration,
     pace,
     ...extraFields,
+    calories: extraFields.active_calories ?? null,
     ...commentField,
     sortOrder: await getBottomSortOrderForDate(date),
     createdAt: Date.now(),
@@ -2224,16 +2238,16 @@ async function renderHrZoneChart(runningLogs) {
 
   const bars = zones.map((z) => ({
     label: `영역${z.zone}`,
-    value: parseMinutesSeconds(z.duration) ?? 0,
+    value: (Number(z.duration_sec) || 0) / 60,
     color: HR_ZONE_COLORS[z.zone] || "#888",
-    topLabel: z.duration ?? "",
+    topLabel: formatSecondsToMinSec(z.duration_sec),
   }));
   drawBarChart(canvas, bars, { zeroBaseline: true });
 
   const zoneMinutes = (zoneNums) =>
     zones
       .filter((z) => zoneNums.includes(z.zone))
-      .reduce((sum, z) => sum + (parseMinutesSeconds(z.duration) ?? 0), 0);
+      .reduce((sum, z) => sum + (Number(z.duration_sec) || 0) / 60, 0);
   const totalMin = bars.reduce((sum, b) => sum + b.value, 0) || 1;
   const lowPct = Math.round((zoneMinutes([1, 2]) / totalMin) * 100);
   const highPct = Math.round((zoneMinutes([4, 5]) / totalMin) * 100);
@@ -2360,7 +2374,7 @@ async function renderRunningLogList(runningLogsSorted) {
   const bodyWeightKg = await getLatestBodyWeightKg();
   container.innerHTML = "";
   ordered.forEach((log) => {
-    const calories = log.total_calories ?? Math.round(calcRunningCalories(log, bodyWeightKg));
+    const calories = log.calories ?? Math.round(calcRunningCalories(log, bodyWeightKg));
     const div = document.createElement("div");
     div.className = "log-item running-log-item";
     div.innerHTML = `
@@ -2387,7 +2401,7 @@ async function openRunningDetail(logId) {
   $("#running-detail-title").textContent = `${log.date} · ${log.distance}km 러닝`;
 
   const bodyWeightKg = await getLatestBodyWeightKg();
-  const calories = log.total_calories ?? Math.round(calcRunningCalories(log, bodyWeightKg));
+  const calories = log.calories ?? Math.round(calcRunningCalories(log, bodyWeightKg));
 
   const sectionsHtml = buildRunningSummaryZonesSplitsHtml(log, `약 ${Math.round(calories)}kcal`);
   const commentHtml = log.geminiComment

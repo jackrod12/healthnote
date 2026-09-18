@@ -367,11 +367,11 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
 /* heart-rate zone 1~5 colors, shared by every chart/summary that breaks a
    run down by zone */
 export const HR_ZONE_COLORS = {
-  1: "#4dabf7", // blue
-  2: "#26c6da", // teal
-  3: "#66bb6a", // green
-  4: "#ffa726", // orange
-  5: "#ef5350", // red
+  1: "#4FC3F7", // blue
+  2: "#4DB6AC", // teal
+  3: "#81C784", // green
+  4: "#FFB74D", // orange
+  5: "#EF5350", // red
 };
 
 const PACE_FAST_COLOR = MINT;
