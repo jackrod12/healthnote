@@ -298,7 +298,7 @@ function renderHomeWorkoutSummary(logs) {
     return;
   }
   container.innerHTML = "";
-  const weightCount = logs.filter((l) => l.type === "weight").length;
+  const weightCount = logs.filter(isStrengthLog).length;
   const cardioCount = logs.filter((l) => l.type === "running" || l.type === "stairmaster").length;
   const div = document.createElement("div");
   div.className = "log-item";
@@ -316,7 +316,7 @@ let calendarViewDate = new Date();
 calendarViewDate.setDate(1);
 
 function renderMonthActivityStats(monthLogs, monthDrinkLogs) {
-  const weightCount = new Set(monthLogs.filter((l) => l.type === "weight").map((l) => l.date)).size;
+  const weightCount = new Set(monthLogs.filter(isStrengthLog).map((l) => l.date)).size;
   const runningCount = new Set(
     monthLogs.filter((l) => l.type === "running" || l.type === "stairmaster").map((l) => l.date)
   ).size;
@@ -362,7 +362,7 @@ async function renderCalendar() {
   };
   monthLogs.forEach((l) => {
     const info = dayInfoFor(l.date);
-    if (l.type === "weight") info.weight = true;
+    if (isStrengthLog(l)) info.weight = true;
     if (l.type === "running" || l.type === "stairmaster") info.running = true;
   });
   monthDrinkLogs.forEach((d) => {
@@ -472,6 +472,11 @@ async function showDayDetail(dateString) {
           <span class="log-title">천국의계단</span>
           <span class="log-sub">단계 ${log.level} · ${minutes}분 ${seconds}초 · 약 ${log.calories}kcal</span>
         </div>`;
+    } else if (log.type === "bodyweight") {
+      div.innerHTML = `
+        <div class="log-main">
+          <span class="log-title">${formatBodyweightLog(log)}</span>
+        </div>`;
     }
     container.appendChild(div);
   });
@@ -511,12 +516,23 @@ $("#btn-close-day-detail").addEventListener("click", () => {
 
 let equipmentCache = [];
 
+const EQUIPMENT_SELECT_GROUPS = ["가슴", "등", "하체", "어깨", "팔", "복근", "유산소", "기타"];
+
+/* 부위별 <optgroup>, each group in the user's own equipment order (설정에서 변경) */
 async function populateEquipmentSelect() {
   equipmentCache = await db.getEquipmentList();
   const select = $("#weight-equipment");
-  select.innerHTML = equipmentCache.length
-    ? equipmentCache.map((e) => `<option value="${e.id}">${e.name} (${e.category})</option>`).join("")
-    : `<option value="">등록된 기구가 없어요 - 설정에서 추가해주세요</option>`;
+  if (!equipmentCache.length) {
+    select.innerHTML = `<option value="">등록된 기구가 없어요 - 설정에서 추가해주세요</option>`;
+    return;
+  }
+  const groupOf = (eq) => (EQUIPMENT_SELECT_GROUPS.includes(eq.category) ? eq.category : "기타");
+  select.innerHTML = EQUIPMENT_SELECT_GROUPS.map((group) => {
+    const items = equipmentCache.filter((eq) => groupOf(eq) === group);
+    if (!items.length) return "";
+    const options = items.map((e) => `<option value="${e.id}">${e.name}</option>`).join("");
+    return `<optgroup label="${group}">${options}</optgroup>`;
+  }).join("");
 }
 
 async function renderWorkoutTab() {
@@ -611,7 +627,7 @@ function renderSingleEquipmentChart(canvas, eq, points) {
       points: points.map((p, i) => ({ index: i, value: Math.round(p.maxWeight * 10) / 10, date: p.date, logId: p.logId })),
     },
   ];
-  drawMultiLineChart(canvas, dateLabels, series, { unit: "kg" });
+  drawMultiLineChart(canvas, dateLabels, series, { paddedRange: true });
   attachChartClickHandler(canvas, (point) => {
     if (point.logId != null) openEquipmentLogDetail(point.logId);
   });
@@ -719,7 +735,7 @@ async function renderCardioCharts(allLogs) {
       paceCanvas,
       recentRunning.map((l) => l.date.slice(5)),
       toSingleSeries("러닝 페이스", "#4dabf7", recentRunning, (l) => l.pace),
-      { unit: "분/km" }
+      { unit: "분/km", paddedRange: true }
     );
   }
 
@@ -734,7 +750,7 @@ async function renderCardioCharts(allLogs) {
       stairCanvas,
       recentStair.map((l) => l.date.slice(5)),
       toSingleSeries("천국의계단", "#ff922b", recentStair, (l) => l.level),
-      { unit: "단계" }
+      { unit: "단계", paddedRange: true }
     );
   }
 }
@@ -882,7 +898,21 @@ function calcLogCalories(log, bodyWeightKg, eq) {
   if (log.type === "weight") return calcWeightLogCalories(log, bodyWeightKg, eq);
   if (log.type === "running") return calcRunningCalories(log, bodyWeightKg);
   if (log.type === "stairmaster") return calcStairmasterCalories(log, bodyWeightKg);
+  if (log.type === "bodyweight") return log.calories ?? 0;
   return 0;
+}
+
+/* 맨몸운동: MET 3.5 x body weight(kg) x hours, where hours is the entered
+   duration if any, otherwise 1분 per set (same convention as weight sets) */
+const BODYWEIGHT_MET = 3.5;
+
+function calcBodyweightCalories({ sets, duration_min }, bodyWeightKg) {
+  const minutes = duration_min > 0 ? duration_min : sets * 1;
+  return BODYWEIGHT_MET * bodyWeightKg * (minutes / 60);
+}
+
+function formatBodyweightLog(log) {
+  return `🤸 ${log.name} / ${log.sets}세트 × ${log.reps}회 / 약 ${Math.round(log.calories ?? 0)}kcal`;
 }
 
 async function renderWorkoutStats() {
@@ -1029,6 +1059,12 @@ async function renderWorkoutLogList(logs) {
             <span class="log-title">천국의계단</span>
             <span class="log-sub">단계 ${log.level} · ${minutes}분 ${seconds}초 · 약 ${Math.round(calories)}kcal</span>
           </div>`;
+      } else if (log.type === "bodyweight") {
+        totalCalories += log.calories ?? 0;
+        mainHtml = `
+          <div class="log-main">
+            <span class="log-title">${formatBodyweightLog(log)}</span>
+          </div>`;
       }
 
       const checkboxHtml = reorderModeActive
@@ -1079,247 +1115,92 @@ async function renderWorkoutLogList(logs) {
   });
 }
 
-/* ---------------- routine favorites ---------------- */
+/* ---------------- 지난 운동 불러오기 ---------------- */
 
-$("#btn-save-routine").addEventListener("click", async () => {
-  const logs = await db.getWorkoutLogsByDate(todayStr());
-  const weightLogs = logs.filter((l) => l.type === "weight");
-  if (!weightLogs.length) {
-    showToast("오늘 기록된 웨이트 운동이 없어요");
-    return;
-  }
-  $("#routine-name-input").value = "";
-  $("#modal-save-routine").hidden = false;
-});
+const PAST_WORKOUT_LOOKBACK_DAYS = 30;
 
-$("#btn-cancel-save-routine").addEventListener("click", () => {
-  $("#modal-save-routine").hidden = true;
-});
-
-$("#form-save-routine").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const name = $("#routine-name-input").value.trim();
-  if (!name) return;
-
-  const logs = await db.getWorkoutLogsByDate(todayStr());
-  const weightLogs = sortWorkoutLogsForDisplay(logs).filter((l) => l.type === "weight");
-  const exercises = weightLogs.map((l) => ({
-    equipmentId: l.equipmentId ?? null,
-    equipmentName: l.equipmentName,
-    category: l.category ?? "",
-    sets: l.sets.map((s) => ({ ...s })),
-  }));
-
-  await db.addRoutine({ name, exercises, createdAt: Date.now() });
-  $("#modal-save-routine").hidden = true;
-  showToast("루틴이 저장되었어요");
-});
-
-/* a routine's "last used" date: the most recent date on which workoutLogs
-   contain every one of the routine's equipment names (not necessarily as a
-   single log, just all present somewhere that day) */
-async function findRoutineLastUsedDate(routine, allLogs) {
-  const namesNeeded = routine.exercises.map((ex) => ex.equipmentName);
-  if (!namesNeeded.length) return null;
-
-  const namesByDate = new Map();
-  allLogs.forEach((l) => {
-    if (l.type !== "weight") return;
-    if (!namesByDate.has(l.date)) namesByDate.set(l.date, new Set());
-    namesByDate.get(l.date).add(l.equipmentName);
-  });
-
-  const matchingDates = [...namesByDate.entries()]
-    .filter(([, namesOnDate]) => namesNeeded.every((n) => namesOnDate.has(n)))
-    .map(([date]) => date)
-    .sort();
-
-  return matchingDates.length ? matchingDates[matchingDates.length - 1] : null;
+function isStrengthLog(log) {
+  return log.type === "weight" || log.type === "bodyweight";
 }
 
-async function renderRoutineList() {
-  const routines = await db.getRoutines();
-  const container = $("#routine-list");
-  if (!routines.length) {
-    container.innerHTML = `<p class="empty-hint">저장된 루틴이 없어요.</p>`;
+function getLogDisplayName(log) {
+  return log.type === "bodyweight" ? log.name : log.equipmentName;
+}
+
+/* "2026-10-07" -> "10/7" */
+function formatMonthDay(dateStr) {
+  const [, m, d] = dateStr.split("-");
+  return `${Number(m)}/${Number(d)}`;
+}
+
+async function renderPastWorkoutList() {
+  const today = todayStr();
+  const since = formatDate(addDays(parseYmd(today), -PAST_WORKOUT_LOOKBACK_DAYS));
+  const logs = (await db.getWorkoutLogsBetween(since, today)).filter(isStrengthLog);
+
+  const logsByDate = new Map();
+  logs.forEach((l) => {
+    if (!logsByDate.has(l.date)) logsByDate.set(l.date, []);
+    logsByDate.get(l.date).push(l);
+  });
+  const dates = [...logsByDate.keys()].sort().reverse();
+
+  const container = $("#past-workout-list");
+  if (!dates.length) {
+    container.innerHTML = `<p class="empty-hint">최근 ${PAST_WORKOUT_LOOKBACK_DAYS}일간 웨이트 운동 기록이 없어요.</p>`;
     return;
   }
-  const allLogs = await db.getAllWorkoutLogs();
-  container.innerHTML = "";
-  for (const r of routines) {
-    const lastUsedDate = await findRoutineLastUsedDate(r, allLogs);
-    const div = document.createElement("div");
-    div.className = "log-item routine-item";
-    const exerciseLines = r.exercises.map((ex) => `<div>${ex.equipmentName} (${ex.sets.length}세트)</div>`).join("");
-    const lastUsedText = lastUsedDate ? `마지막 사용: ${lastUsedDate}` : "아직 사용 기록 없음";
-    div.innerHTML = `
-      <div class="log-main">
-        <span class="log-title">${r.name}</span>
-        <div class="routine-exercise-lines">${exerciseLines}</div>
-        <span class="log-sub routine-last-used">${lastUsedText}</span>
-      </div>
-      <div class="set-item-actions">
-        <button type="button" class="btn btn-primary btn-sm routine-apply" data-id="${r.id}">불러오기</button>
-        <button type="button" class="icon-btn routine-edit" data-id="${r.id}">✏️</button>
-        <button type="button" class="log-delete routine-delete" data-id="${r.id}">✕</button>
-      </div>`;
-    container.appendChild(div);
-  }
+  container.innerHTML = dates
+    .map((date) => {
+      const names = sortWorkoutLogsForDisplay(logsByDate.get(date)).map(getLogDisplayName);
+      return `
+        <button type="button" class="log-item past-workout-item" data-date="${date}">
+          <div class="log-main">
+            <span class="log-title">${formatMonthDay(date)} — ${names.join(", ")}</span>
+            <span class="log-sub">${names.length}개 운동</span>
+          </div>
+        </button>`;
+    })
+    .join("");
 
-  $$(".routine-apply", container).forEach((btn) => {
-    btn.addEventListener("click", () => applyRoutine(Number(btn.dataset.id)));
-  });
-  $$(".routine-delete", container).forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!confirm("정말 삭제할까요?")) return;
-      await db.deleteRoutine(Number(btn.dataset.id));
-      await renderRoutineList();
-    });
-  });
-  $$(".routine-edit", container).forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const id = Number(btn.dataset.id);
-      const routine = (await db.getRoutines()).find((r) => r.id === id);
-      if (routine) openEditRoutineModal(routine);
-    });
+  $$(".past-workout-item", container).forEach((btn) => {
+    btn.addEventListener("click", () => applyPastWorkout(btn.dataset.date, logsByDate.get(btn.dataset.date)));
   });
 }
 
-/* ---------------- routine editing ---------------- */
-
-let editingRoutineId = null;
-let editingRoutineCreatedAt = null;
-let editingRoutineExercises = [];
-
-function renderEditRoutineExerciseList() {
-  const container = $("#edit-routine-exercise-list");
-  if (!editingRoutineExercises.length) {
-    container.innerHTML = `<p class="empty-hint">운동이 없어요.</p>`;
-    return;
-  }
-  container.innerHTML = "";
-  editingRoutineExercises.forEach((ex, i) => {
-    const div = document.createElement("div");
-    div.className = "log-item";
-    div.innerHTML = `
-      <div class="log-main">
-        <span class="log-title">${ex.equipmentName}</span>
-        <span class="log-sub">${ex.sets.length}세트</span>
-      </div>
-      <div class="log-item-actions">
-        <button type="button" class="icon-btn routine-ex-up" data-index="${i}" ${i === 0 ? "disabled" : ""}>▲</button>
-        <button type="button" class="icon-btn routine-ex-down" data-index="${i}" ${i === editingRoutineExercises.length - 1 ? "disabled" : ""}>▼</button>
-        <button type="button" class="log-delete routine-ex-delete" data-index="${i}">✕</button>
-      </div>`;
-    container.appendChild(div);
-  });
-
-  $$(".routine-ex-up", container).forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const i = Number(btn.dataset.index);
-      if (i <= 0) return;
-      [editingRoutineExercises[i - 1], editingRoutineExercises[i]] = [editingRoutineExercises[i], editingRoutineExercises[i - 1]];
-      renderEditRoutineExerciseList();
-    });
-  });
-  $$(".routine-ex-down", container).forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const i = Number(btn.dataset.index);
-      if (i >= editingRoutineExercises.length - 1) return;
-      [editingRoutineExercises[i], editingRoutineExercises[i + 1]] = [editingRoutineExercises[i + 1], editingRoutineExercises[i]];
-      renderEditRoutineExerciseList();
-    });
-  });
-  $$(".routine-ex-delete", container).forEach((btn) => {
-    btn.addEventListener("click", () => {
-      editingRoutineExercises.splice(Number(btn.dataset.index), 1);
-      renderEditRoutineExerciseList();
-    });
-  });
-}
-
-function openEditRoutineModal(routine) {
-  editingRoutineId = routine.id;
-  editingRoutineCreatedAt = routine.createdAt ?? Date.now();
-  editingRoutineExercises = routine.exercises.map((ex) => ({ ...ex, sets: ex.sets.map((s) => ({ ...s })) }));
-  $("#edit-routine-name-input").value = routine.name;
-  renderEditRoutineExerciseList();
-  $("#modal-edit-routine").hidden = false;
-}
-
-function closeEditRoutineModal() {
-  $("#modal-edit-routine").hidden = true;
-  editingRoutineId = null;
-  editingRoutineCreatedAt = null;
-  editingRoutineExercises = [];
-}
-
-$("#btn-cancel-edit-routine").addEventListener("click", closeEditRoutineModal);
-
-$("#btn-save-edit-routine").addEventListener("click", async () => {
-  if (editingRoutineId == null) return;
-  const name = $("#edit-routine-name-input").value.trim();
-  if (!name) {
-    showToast("루틴 이름을 입력해주세요");
-    return;
-  }
-  if (!editingRoutineExercises.length) {
-    showToast("운동을 최소 1개 이상 남겨주세요");
-    return;
-  }
-  await db.updateRoutine(editingRoutineId, {
-    name,
-    exercises: editingRoutineExercises,
-    createdAt: editingRoutineCreatedAt,
-  });
-  closeEditRoutineModal();
-  await renderRoutineList();
-  showToast("루틴이 수정되었어요");
-});
-
-async function applyRoutine(routineId) {
-  const routines = await db.getRoutines();
-  const routine = routines.find((r) => r.id === routineId);
-  if (!routine) return;
-
-  const currentEquipment = await db.getEquipmentList();
-
-  for (const ex of routine.exercises) {
-    const equipment = currentEquipment.find((eq) => eq.id === ex.equipmentId);
-    const equipmentName = equipment ? equipment.name : ex.equipmentName;
-    const category = equipment ? equipment.category : ex.category || "";
-    const manufacturer = equipment ? equipment.manufacturer || "" : "";
-    const sortOrder = await getBottomSortOrder();
+/* copies every weight/bodyweight log of sourceDate onto today, keeping that
+   day's display order and each log's sets as-is */
+async function applyPastWorkout(sourceDate, sourceLogs) {
+  const today = todayStr();
+  const ordered = sortWorkoutLogsForDisplay(sourceLogs);
+  for (const src of ordered) {
+    const { id, sortOrder, createdAt, fromRoutine, ...rest } = src;
     const log = {
-      date: todayStr(),
-      type: "weight",
-      equipmentId: ex.equipmentId,
-      equipmentName,
-      category,
-      manufacturer,
-      sets: ex.sets.map((s) => ({ ...s })),
-      sortOrder,
+      ...rest,
+      date: today,
+      sortOrder: await getBottomSortOrderForDate(today),
       createdAt: Date.now(),
-      fromRoutine: true,
+      copiedFrom: sourceDate,
     };
+    if (Array.isArray(src.sets)) log.sets = src.sets.map((s) => ({ ...s }));
     await db.addWorkoutLog(log);
   }
 
-  $("#modal-load-routine").hidden = true;
-  const logs = await db.getWorkoutLogsByDate(todayStr());
+  $("#modal-load-past-workout").hidden = true;
+  const logs = await db.getWorkoutLogsByDate(today);
   await renderWorkoutLogList(logs);
   renderHomeWorkoutSummary(logs);
   await checkForNewBadges();
-  showToast(`"${routine.name}" 루틴을 불러왔어요`);
+  showToast(`${ordered.length}개 운동을 불러왔습니다`);
 }
 
-$("#btn-load-routine").addEventListener("click", async () => {
-  await renderRoutineList();
-  $("#modal-load-routine").hidden = false;
+$("#btn-load-past-workout").addEventListener("click", async () => {
+  await renderPastWorkoutList();
+  $("#modal-load-past-workout").hidden = false;
 });
 
-$("#btn-cancel-load-routine").addEventListener("click", () => {
-  $("#modal-load-routine").hidden = true;
+$("#btn-cancel-load-past-workout").addEventListener("click", () => {
+  $("#modal-load-past-workout").hidden = true;
 });
 
 /* add workout modal */
@@ -1564,6 +1445,7 @@ function setEditModeIndicator(text) {
   $("#modal-add-workout-title").textContent = text || "운동 추가";
   $("#btn-finish-weight").textContent = text ? "수정 완료" : "운동 완료";
   $("#btn-finish-running").textContent = text ? "수정 완료" : "저장";
+  $("#btn-finish-bodyweight").textContent = text ? "수정 완료" : "저장";
   $$(".segmented-btn", $("#workout-type-toggle")).forEach((b) => (b.disabled = !!text));
   $("#weight-equipment").disabled = !!text || currentSets.length > 0;
 }
@@ -1572,6 +1454,8 @@ function setWorkoutTypeToggle(type) {
   $$(".segmented-btn", $("#workout-type-toggle")).forEach((b) => b.classList.toggle("active", b.dataset.type === type));
   $("#form-weight").hidden = type !== "weight";
   $("#form-running").hidden = type !== "running";
+  $("#form-bodyweight").hidden = type !== "bodyweight";
+  if (type === "bodyweight") updateBodyweightCaloriePreview();
 }
 
 async function startEditWorkoutLog(log) {
@@ -1590,6 +1474,18 @@ async function startEditWorkoutLog(log) {
     $("#running-duration").value = log.duration;
     updateRunningPacePreview();
     setEditModeIndicator("✏️ 수정 중 — 러닝");
+    return;
+  }
+
+  if (log.type === "bodyweight") {
+    setWorkoutTypeToggle("bodyweight");
+    $("#bodyweight-name").value = log.name;
+    $("#bodyweight-sets").value = log.sets;
+    $("#bodyweight-reps").value = log.reps;
+    $("#bodyweight-duration").value = log.duration_min ?? "";
+    syncBodyweightPresetPills();
+    await updateBodyweightCaloriePreview();
+    setEditModeIndicator(`✏️ 수정 중 — ${log.name}`);
     return;
   }
 
@@ -1630,6 +1526,7 @@ function closeAddWorkoutModal() {
   resetStairmasterState();
   resetPreviousRecordInfo();
   resetFitnessImportState();
+  resetBodyweightForm();
   resetWorkoutDateInput();
   editingLogId = null;
   editingLogSnapshot = null;
@@ -1784,6 +1681,91 @@ $("#btn-finish-weight").addEventListener("click", async () => {
   renderHomeWorkoutSummary(logs);
   await checkForNewBadges();
   showToast(date === todayStr() ? "운동이 기록되었어요" : `운동이 ${date}로 기록되었어요`);
+});
+
+/* ---- 맨몸운동 ---- */
+let bodyweightBodyWeightKg = DEFAULT_BODY_WEIGHT_KG;
+
+function readBodyweightForm() {
+  const duration = Number($("#bodyweight-duration").value);
+  return {
+    name: $("#bodyweight-name").value.trim(),
+    sets: Number($("#bodyweight-sets").value) || 0,
+    reps: Number($("#bodyweight-reps").value) || 0,
+    duration_min: duration > 0 ? duration : null,
+  };
+}
+
+function renderBodyweightCaloriePreview() {
+  const calories = calcBodyweightCalories(readBodyweightForm(), bodyweightBodyWeightKg);
+  $("#bodyweight-calorie-preview").textContent = Math.round(calories);
+}
+
+async function updateBodyweightCaloriePreview() {
+  bodyweightBodyWeightKg = await getLatestBodyWeightKg();
+  renderBodyweightCaloriePreview();
+}
+
+function resetBodyweightForm() {
+  ["#bodyweight-name", "#bodyweight-sets", "#bodyweight-reps", "#bodyweight-duration"].forEach((sel) => {
+    $(sel).value = "";
+  });
+  syncBodyweightPresetPills();
+  $("#bodyweight-calorie-preview").textContent = "0";
+}
+
+function syncBodyweightPresetPills() {
+  const name = $("#bodyweight-name").value.trim();
+  $$(".pill", $("#bodyweight-presets")).forEach((b) => b.classList.toggle("active", b.dataset.name === name));
+}
+
+$$(".pill", $("#bodyweight-presets")).forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $("#bodyweight-name").value = btn.dataset.name;
+    syncBodyweightPresetPills();
+  });
+});
+$("#bodyweight-name").addEventListener("input", syncBodyweightPresetPills);
+["#bodyweight-sets", "#bodyweight-reps", "#bodyweight-duration"].forEach((sel) => {
+  $(sel).addEventListener("input", renderBodyweightCaloriePreview);
+});
+
+$("#btn-cancel-bodyweight").addEventListener("click", closeAddWorkoutModal);
+
+$("#btn-finish-bodyweight").addEventListener("click", async () => {
+  const date = getSelectedWorkoutDate();
+  const entry = readBodyweightForm();
+  if (!entry.name) {
+    showToast("운동 이름을 입력해주세요");
+    return;
+  }
+  if (!(entry.sets > 0) || !(entry.reps > 0)) {
+    showToast("세트수와 횟수를 입력해주세요");
+    return;
+  }
+  const bodyWeightKg = await getLatestBodyWeightKg();
+  const calories = Math.round(calcBodyweightCalories(entry, bodyWeightKg));
+  const wasEditing = editingLogId != null;
+
+  if (wasEditing) {
+    await db.updateWorkoutLog(editingLogId, { ...editingLogSnapshot, type: "bodyweight", date, ...entry, calories });
+  } else {
+    await db.addWorkoutLog({
+      date,
+      type: "bodyweight",
+      ...entry,
+      calories,
+      sortOrder: await getBottomSortOrderForDate(date),
+      createdAt: Date.now(),
+    });
+  }
+  closeAddWorkoutModal();
+  const logs = await db.getWorkoutLogsByDate(todayStr());
+  await renderWorkoutLogList(logs);
+  renderHomeWorkoutSummary(logs);
+  await checkForNewBadges();
+  if (wasEditing) showToast("운동 기록이 수정되었어요");
+  else showToast(date === todayStr() ? "맨몸운동이 기록되었어요" : `맨몸운동이 ${date}로 기록되었어요`);
 });
 
 $("#running-distance").addEventListener("input", updateRunningPacePreview);
@@ -2373,9 +2355,9 @@ function renderSplitsChart(runningLogs) {
     label: `${s.km}`,
     value: parsePaceLabel(s.pace) ?? 0,
     color: "#00e5a0",
-    topLabel: s.heart_rate != null ? `${s.heart_rate}bpm` : "",
+    topLabel: s.heart_rate != null ? `${s.heart_rate}` : "",
   }));
-  drawBarChart(canvas, bars);
+  drawBarChart(canvas, bars, { topLabelUnit: splits.some((s) => s.heart_rate != null) ? "심박수 (BPM)" : "" });
 
   const paceValues = splits.map((s) => parsePaceLabel(s.pace)).filter((v) => v != null);
   if (paceValues.length >= 2) {
@@ -3097,10 +3079,12 @@ function renderFilteredEquipmentItems() {
   filtered.forEach((eq) => {
     const div = document.createElement("div");
     div.className = "log-item equipment-item";
+    div.dataset.id = eq.id;
     const thumb = eq.photo
       ? `<img class="equipment-thumb" src="${eq.photo}" alt="${eq.name}" />`
       : `<div class="equipment-thumb equipment-thumb-placeholder">🏋️</div>`;
     div.innerHTML = `
+      <span class="drag-handle" aria-label="순서 변경">≡</span>
       <input type="checkbox" class="equipment-checkbox" data-id="${eq.id}" />
       ${thumb}
       <div class="log-main">
@@ -3126,6 +3110,52 @@ function renderFilteredEquipmentItems() {
   $$(".equipment-edit", container).forEach((btn) => {
     btn.addEventListener("click", () => openEditEquipmentModal(Number(btn.dataset.id)));
   });
+
+  $$(".drag-handle", container).forEach((handle) => {
+    handle.addEventListener("pointerdown", (e) => startEquipmentDrag(e, handle.closest(".equipment-item"), container));
+  });
+}
+
+/* drag-and-drop reorder via the ≡ handle (pointer events, so touch and
+   mouse both work). Only the currently-visible (category-filtered) items
+   move; on drop their new relative order is written back into the same
+   slots of the full list and saved as each equipment's sortOrder. */
+function startEquipmentDrag(e, item, container) {
+  e.preventDefault();
+  const handle = e.currentTarget;
+  try {
+    handle.setPointerCapture(e.pointerId);
+  } catch {}
+  item.classList.add("dragging");
+
+  const onMove = (ev) => {
+    const target = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".equipment-item");
+    if (!target || target === item || target.parentElement !== container) return;
+    const rect = target.getBoundingClientRect();
+    const after = ev.clientY > rect.top + rect.height / 2;
+    container.insertBefore(item, after ? target.nextSibling : target);
+  };
+
+  const onEnd = async () => {
+    handle.removeEventListener("pointermove", onMove);
+    handle.removeEventListener("pointerup", onEnd);
+    handle.removeEventListener("pointercancel", onEnd);
+    item.classList.remove("dragging");
+
+    const visibleIds = $$(".equipment-item", container).map((el) => Number(el.dataset.id));
+    const visibleSet = new Set(visibleIds);
+    let next = 0;
+    const fullOrder = settingsEquipmentCache.map((eq) => (visibleSet.has(eq.id) ? visibleIds[next++] : eq.id));
+    if (fullOrder.every((id, i) => id === settingsEquipmentCache[i].id)) return;
+
+    await db.reorderEquipment(fullOrder);
+    settingsEquipmentCache = await db.getEquipmentList();
+    await populateEquipmentSelect();
+  };
+
+  handle.addEventListener("pointermove", onMove);
+  handle.addEventListener("pointerup", onEnd);
+  handle.addEventListener("pointercancel", onEnd);
 }
 
 $("#equipment-select-all").addEventListener("change", (e) => {
@@ -3221,10 +3251,9 @@ $("#form-edit-equipment").addEventListener("submit", async (e) => {
   const existing = settingsEquipmentCache.find((eItem) => eItem.id === editingEquipmentId);
   const photo = pendingEditPhoto !== undefined ? pendingEditPhoto : existing?.photo ?? null;
 
-  await db.updateEquipment(editingEquipmentId, { name, manufacturer, category, isAssist, memo, photo });
+  await db.updateEquipment(editingEquipmentId, { ...existing, name, manufacturer, category, isAssist, memo, photo });
   if (existing) {
     await db.renameEquipmentInWorkoutLogs(editingEquipmentId, existing.name, name);
-    await db.renameEquipmentInRoutines(editingEquipmentId, existing.name, name);
   }
   closeEditEquipmentModal();
   await renderEquipmentList();

@@ -3,7 +3,7 @@ import * as db from "./db.js";
 /* =====================================================================
  * 뱃지 시스템 — 포켓몬 뱃지 스타일 (단순/명확)
  * 모든 뱃지는 DB에 저장되지 않고, 기존 기록(workoutLogs/inbodyRecords/
- * drinkLog2/routines/workoutMemo/settings)으로부터 매번 다시 계산됩니다.
+ * drinkLog2/workoutMemo/settings)으로부터 매번 다시 계산됩니다.
  * "달성일"은 조건을 최초로 만족시킨 시점의 날짜를 데이터에서 역산해서
  * 구합니다.
  *
@@ -313,6 +313,7 @@ function calcLogCalories(log, bodyWeightKg, eq) {
   if (log.type === "weight") return calcWeightLogCalories(log, bodyWeightKg, eq);
   if (log.type === "running") return calcRunningCalories(log, bodyWeightKg);
   if (log.type === "stairmaster") return calcStairmasterCalories(log, bodyWeightKg);
+  if (log.type === "bodyweight") return log.calories ?? 0;
   return 0;
 }
 
@@ -576,7 +577,7 @@ function seasonOf(dateStr) {
 }
 
 /* ---------------- 데이터 준비 ---------------- */
-function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals, equipmentList }) {
+function prepare({ workoutLogs, inbodyRecords, drinkLogs, memos, goals, equipmentList }) {
   const resolveEquipment = makeEquipmentResolver(equipmentList || []);
   const weightLogs = workoutLogs.filter((l) => l.type === "weight").slice().sort(byDateThenId);
   const runningLogs = workoutLogs.filter((l) => l.type === "running").slice().sort(byDateThenId);
@@ -611,9 +612,9 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals
   const mondayDatesSorted = allWorkoutDatesSorted.filter((d) => parseDate(d).getDay() === 1);
   const fridayDatesSorted = allWorkoutDatesSorted.filter((d) => parseDate(d).getDay() === 5);
 
-  const nonRoutineLogsSorted = allLogsSorted.filter((l) => l.fromRoutine !== true);
-
-  const routinesSorted = routines.slice().sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  // logs copied from an earlier day (지난 운동 불러오기, or the old routine
+  // loader) don't count as entering a workout by hand
+  const nonRoutineLogsSorted = allLogsSorted.filter((l) => l.fromRoutine !== true && !l.copiedFrom);
   const memosSorted = memos.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   const firstWorkoutDate = allWorkoutDatesSorted[0] || null;
@@ -678,7 +679,7 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals
     const byDate = new Map();
     for (const log of allLogsSorted) {
       if (!byDate.has(log.date)) byDate.set(log.date, new Set());
-      byDate.get(log.date).add(log.type === "weight" ? "weight" : log.type === "running" || log.type === "stairmaster" ? "cardio" : null);
+      byDate.get(log.date).add(log.type === "weight" || log.type === "bodyweight" ? "weight" : log.type === "running" || log.type === "stairmaster" ? "cardio" : null);
     }
     for (const [date, types] of byDate) {
       if (types.has("weight") && types.has("cardio")) {
@@ -872,7 +873,6 @@ function prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals
     mondayDatesSorted,
     fridayDatesSorted,
     nonRoutineLogsSorted,
-    routinesSorted,
     memosSorted,
     firstWorkoutDate,
     within30OfFirst,
@@ -1451,27 +1451,9 @@ function buildBadges(data) {
     centerLabel: "30",
     subLabel: "회",
     name: "혼자서도 잘해요",
-    description: "루틴 없이 직접 운동을 30회 기록했어요",
+    description: "불러오기 없이 직접 운동을 30회 기록했어요",
     achievedDate: data.nonRoutineLogsSorted.length >= 30 ? data.nonRoutineLogsSorted[29].date : null,
     progress: progressFromCount(data.nonRoutineLogsSorted.length, 30, "회"),
-  });
-  list.push({
-    id: "style-planner",
-    category: "style",
-    series: "계획형 인간",
-    tier: 2,
-    glyph: "starOutline",
-    centerLabel: "5",
-    subLabel: "루틴",
-    name: "계획형 인간",
-    description: "루틴을 5개 저장했어요",
-    achievedDate:
-      data.routinesSorted.length >= 5
-        ? data.routinesSorted[4].createdAt
-          ? formatDateObj(new Date(data.routinesSorted[4].createdAt))
-          : data.todayStr
-        : null,
-    progress: progressFromCount(data.routinesSorted.length, 5, "개"),
   });
   list.push({
     id: "style-record-keeper",
@@ -1944,19 +1926,18 @@ function buildBadges(data) {
 
 /* ---------------- 엔트리 포인트 ---------------- */
 export async function evaluateAllBadges() {
-  const [workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals, equipmentList] = await Promise.all([
+  const [workoutLogs, inbodyRecords, drinkLogs, memos, goals, equipmentList] = await Promise.all([
     db.getAllWorkoutLogs(),
     db.getAllInbodyRecords(),
     db.getAllDrinkLogs(),
-    db.getRoutines(),
     db.getAllWorkoutMemos(),
     db.getSetting("fitnessGoals", null),
     db.getEquipmentList(),
   ]);
-  const data = prepare({ workoutLogs, inbodyRecords, drinkLogs, routines, memos, goals, equipmentList });
+  const data = prepare({ workoutLogs, inbodyRecords, drinkLogs, memos, goals, equipmentList });
   const list = buildBadges(data);
 
-  // "전설의 시작"은 다른 149개 뱃지 중 50개를 달성한 시점을 가리키는 메타 뱃지
+  // "전설의 시작"은 다른 148개 뱃지 중 50개를 달성한 시점을 가리키는 메타 뱃지
   const legend = list.find((b) => b.id === "hidden-legend-begins");
   if (legend) {
     const otherAchievedDates = list

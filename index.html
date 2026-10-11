@@ -88,10 +88,7 @@
 
     <!-- 운동 -->
     <section class="view" id="view-workout" data-view="workout" hidden>
-      <div class="btn-row">
-        <button type="button" class="btn btn-ghost" id="btn-save-routine">⭐ 루틴 저장</button>
-        <button type="button" class="btn btn-ghost" id="btn-load-routine">📋 루틴 불러오기</button>
-      </div>
+      <button type="button" class="btn btn-ghost btn-block" id="btn-load-past-workout">📅 지난 운동 불러오기</button>
 
       <div class="section-header">
         <h2 class="card-title">오늘 운동 기록</h2>
@@ -460,6 +457,7 @@
     <div class="segmented" id="workout-type-toggle">
       <button class="segmented-btn active" data-type="weight">웨이트</button>
       <button class="segmented-btn" data-type="running">러닝</button>
+      <button class="segmented-btn" data-type="bodyweight">맨몸운동</button>
     </div>
 
     <div id="form-weight" class="form-grid">
@@ -508,6 +506,28 @@
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" id="btn-cancel-weight">취소</button>
         <button type="button" class="btn btn-primary" id="btn-finish-weight">운동 완료</button>
+      </div>
+    </div>
+
+    <div id="form-bodyweight" class="form-grid" hidden>
+      <label>운동 이름<input type="text" id="bodyweight-name" placeholder="예: 풀업" /></label>
+      <div class="pill-row" id="bodyweight-presets">
+        <button type="button" class="pill" data-name="풀업">풀업</button>
+        <button type="button" class="pill" data-name="딥스">딥스</button>
+        <button type="button" class="pill" data-name="푸시업">푸시업</button>
+        <button type="button" class="pill" data-name="플랭크">플랭크</button>
+        <button type="button" class="pill" data-name="크런치">크런치</button>
+        <button type="button" class="pill" data-name="런지">런지</button>
+        <button type="button" class="pill" data-name="버피">버피</button>
+        <button type="button" class="pill" data-name="마운틴클라이머">마운틴클라이머</button>
+      </div>
+      <label>세트수<input type="number" id="bodyweight-sets" min="1" step="1" /></label>
+      <label>횟수<input type="number" id="bodyweight-reps" min="1" step="1" /></label>
+      <label>시간(분, 선택)<input type="number" id="bodyweight-duration" min="0" step="0.5" /></label>
+      <div class="stairmaster-calorie-preview">예상 칼로리: 약 <span id="bodyweight-calorie-preview">0</span>kcal</div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="btn-cancel-bodyweight">취소</button>
+        <button type="button" class="btn btn-primary" id="btn-finish-bodyweight">저장</button>
       </div>
     </div>
 
@@ -574,47 +594,15 @@
   </div>
 </div>
 
-<!-- 루틴 저장 모달 -->
-<div class="modal-overlay" id="modal-save-routine" hidden>
+<!-- 지난 운동 불러오기 모달 -->
+<div class="modal-overlay" id="modal-load-past-workout" hidden>
   <div class="modal-sheet">
     <div class="modal-handle"></div>
-    <h2 class="card-title">루틴 저장</h2>
-    <form id="form-save-routine" class="form-grid">
-      <label>루틴 이름<input type="text" id="routine-name-input" placeholder="예: 가슴+삼두 루틴" required /></label>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-ghost" id="btn-cancel-save-routine">취소</button>
-        <button type="submit" class="btn btn-primary">저장</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- 루틴 불러오기 모달 -->
-<div class="modal-overlay" id="modal-load-routine" hidden>
-  <div class="modal-sheet">
-    <div class="modal-handle"></div>
-    <h2 class="card-title">루틴 불러오기</h2>
-    <div id="routine-list" class="summary-list">
-      <p class="empty-hint">저장된 루틴이 없어요.</p>
-    </div>
+    <h2 class="card-title">지난 운동 불러오기</h2>
+    <p class="stats-hint">최근 30일 기록 중 날짜를 고르면 그날의 운동을 세트 그대로 오늘에 추가해요</p>
+    <div id="past-workout-list" class="summary-list"></div>
     <div class="modal-actions">
-      <button type="button" class="btn btn-ghost btn-block" id="btn-cancel-load-routine">닫기</button>
-    </div>
-  </div>
-</div>
-
-<!-- 루틴 수정 모달 -->
-<div class="modal-overlay" id="modal-edit-routine" hidden>
-  <div class="modal-sheet">
-    <div class="modal-handle"></div>
-    <h2 class="card-title">루틴 수정</h2>
-    <div class="form-grid">
-      <label>루틴 이름<input type="text" id="edit-routine-name-input" /></label>
-    </div>
-    <div id="edit-routine-exercise-list" class="summary-list"></div>
-    <div class="modal-actions">
-      <button type="button" class="btn btn-ghost" id="btn-cancel-edit-routine">취소</button>
-      <button type="button" class="btn btn-primary" id="btn-save-edit-routine">저장</button>
+      <button type="button" class="btn btn-ghost btn-block" id="btn-cancel-load-past-workout">닫기</button>
     </div>
   </div>
 </div>

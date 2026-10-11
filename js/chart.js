@@ -88,6 +88,24 @@ export function computeNiceYRange(values) {
   return { min, max, step };
 }
 
+/**
+ * Like computeNiceYRange, but pads the data by 30% of its own range on both
+ * sides before rounding outward to the step, so the line sits in the vertical
+ * middle of the plot instead of hugging the top/bottom edges. A flat series
+ * (every value identical) gets a fixed ±10 around that value.
+ */
+export function computePaddedYRange(values) {
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  const range = dataMax - dataMin;
+  const lo = range === 0 ? dataMin - 10 : dataMin - range * 0.3;
+  const hi = range === 0 ? dataMax + 10 : dataMax + range * 0.3;
+  const { step } = computeNiceYRange([lo, hi]);
+  // never pad an all-non-negative series (weights, levels, paces) below 0
+  const min = Math.floor(lo / step) * step;
+  return { min: dataMin >= 0 ? Math.max(min, 0) : min, max: Math.ceil(hi / step) * step, step };
+}
+
 /* yFor is passed in (rather than recomputed here) so a chart with an
    inverted axis — e.g. pace, where a smaller number is "better" and drawn
    higher up — still gets gridlines at the right pixel positions */
@@ -222,7 +240,7 @@ export function drawLineChart(canvas, labels, values, options = {}) {
  * @param {HTMLCanvasElement} canvas
  * @param {string[]} dateLabels - shared x-axis labels, index-addressed by each point
  * @param {{name: string, color: string, points: {index: number, value: number, date: string, logId?: number}[]}[]} series
- * @param {{unit?: string}} [options]
+ * @param {{unit?: string, paddedRange?: boolean}} [options]
  */
 export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
   const unit = options.unit || "";
@@ -244,7 +262,7 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
   const plotW = width - padding.left - padding.right;
   const plotH = height - padding.top - padding.bottom;
 
-  const { min, max, step } = computeNiceYRange(allValues);
+  const { min, max, step } = options.paddedRange ? computePaddedYRange(allValues) : computeNiceYRange(allValues);
   const range = max - min || 1;
   const yFor = (v) => padding.top + plotH - ((v - min) / range) * plotH;
   const n = dateLabels.length;
@@ -311,7 +329,7 @@ export function drawMultiLineChart(canvas, dateLabels, series, options = {}) {
 
   canvas.__chartPoints = hitPoints;
 
-  // per-point value labels ("60kg") near every point — none are skipped,
+  // per-point value labels ("60" or "60kg", per options.unit) near every point — none are skipped,
   // every point gets its value shown:
   // - alternate above/below by point index so labels on adjacent, closely
   //   spaced points don't run into each other
@@ -528,7 +546,9 @@ export function drawPaceTrendChart(canvas, dateLabels, points, options = {}) {
  *
  * @param {HTMLCanvasElement} canvas
  * @param {{label: string, value: number, color?: string, topLabel?: string}[]} bars
- * @param {{zeroBaseline?: boolean}} [options]
+ * @param {{zeroBaseline?: boolean, topLabelUnit?: string}} [options]
+ *   topLabelUnit: the unit for every bar's topLabel, shown once in the
+ *   chart's top-left corner instead of repeated on each bar
  */
 export function drawBarChart(canvas, bars, options = {}) {
   const { ctx, width, height } = setupCanvasForDPR(canvas);
@@ -552,6 +572,13 @@ export function drawBarChart(canvas, bars, options = {}) {
   const yFor = (v) => padding.top + plotH - ((v - min) / range) * plotH;
 
   drawYAxisGrid(ctx, { padding, plotW, width, min, max, step, yFor });
+
+  if (options.topLabelUnit) {
+    ctx.fillStyle = TEXT_DIM;
+    ctx.font = STAT_CHART_AXIS_FONT;
+    ctx.textAlign = "left";
+    ctx.fillText(options.topLabelUnit, 4, 12);
+  }
 
   const n = bars.length;
   const slot = plotW / n;

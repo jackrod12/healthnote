@@ -3,7 +3,7 @@ import { openDB } from "https://cdn.jsdelivr.net/npm/idb@8/+esm";
 const DB_NAME = "healthnote-db";
 const DB_VERSION = 5;
 
-export const STORE_NAMES = ["settings", "equipment", "workoutLogs", "inbodyRecords", "drinkLog2", "workoutMemo", "routines"];
+export const STORE_NAMES = ["settings", "equipment", "workoutLogs", "inbodyRecords", "drinkLog2", "workoutMemo"];
 
 let dbPromise = null;
 
@@ -53,9 +53,6 @@ function getDB() {
         if (!db.objectStoreNames.contains("workoutMemo")) {
           db.createObjectStore("workoutMemo", { keyPath: "date" });
         }
-        if (!db.objectStoreNames.contains("routines")) {
-          db.createObjectStore("routines", { keyPath: "id", autoIncrement: true });
-        }
       },
     });
   }
@@ -80,14 +77,42 @@ export async function deleteSetting(key) {
 }
 
 /* ---------- equipment ---------- */
+
+/* user-defined order (설정 > 헬스장 기구 drag reorder): sortOrder ascending,
+   with equipment that has never been reordered falling to the end by id */
+function compareEquipmentOrder(a, b) {
+  const ka = a.sortOrder ?? Infinity;
+  const kb = b.sortOrder ?? Infinity;
+  if (ka !== kb) return ka - kb;
+  return a.id - b.id;
+}
+
 export async function getEquipmentList() {
   const db = await getDB();
-  return db.getAll("equipment");
+  const all = await db.getAll("equipment");
+  return all.sort(compareEquipmentOrder);
 }
 
 export async function addEquipment(data) {
   const db = await getDB();
-  return db.add("equipment", data);
+  const all = await db.getAll("equipment");
+  const orders = all.map((eq) => eq.sortOrder).filter((n) => n != null);
+  const record = orders.length ? { ...data, sortOrder: Math.max(...orders) + 1 } : data;
+  return db.add("equipment", record);
+}
+
+/* idsInOrder lists every equipment id top to bottom; each gets sortOrder = its index */
+export async function reorderEquipment(idsInOrder) {
+  const db = await getDB();
+  const tx = db.transaction("equipment", "readwrite");
+  await Promise.all([
+    ...idsInOrder.map(async (id, index) => {
+      const eq = await tx.store.get(id);
+      if (!eq) return;
+      await tx.store.put({ ...eq, sortOrder: index });
+    }),
+    tx.done,
+  ]);
 }
 
 export async function updateEquipment(id, data) {
@@ -186,33 +211,6 @@ export async function renameEquipmentInWorkoutLogs(equipmentId, oldName, newName
   ]);
 }
 
-/**
- * Keeps saved routines in sync with an equipment rename: within each
- * routine's exercises array, any entry already linked by equipmentId gets
- * its equipmentName updated, and any legacy entry that predates equipmentId
- * (matched by its old equipmentName instead) gets equipmentName updated too.
- */
-export async function renameEquipmentInRoutines(equipmentId, oldName, newName) {
-  const db = await getDB();
-  const routines = await db.getAll("routines");
-  const toUpdate = [];
-  for (const routine of routines) {
-    let changed = false;
-    const exercises = routine.exercises.map((ex) => {
-      const matches = ex.equipmentId === equipmentId || (ex.equipmentId == null && ex.equipmentName === oldName);
-      if (matches && ex.equipmentName !== newName) {
-        changed = true;
-        return { ...ex, equipmentName: newName };
-      }
-      return ex;
-    });
-    if (changed) toUpdate.push({ ...routine, exercises });
-  }
-  if (!toUpdate.length) return;
-  const tx = db.transaction("routines", "readwrite");
-  await Promise.all([...toUpdate.map((r) => tx.store.put(r)), tx.done]);
-}
-
 export async function getRecentWorkoutLogs(days = 7) {
   const db = await getDB();
   const all = await db.getAll("workoutLogs");
@@ -283,27 +281,6 @@ export async function getAllWorkoutMemos() {
 export async function setWorkoutMemo(date, memo) {
   const db = await getDB();
   await db.put("workoutMemo", { date, memo });
-}
-
-/* ---------- routines ---------- */
-export async function getRoutines() {
-  const db = await getDB();
-  return db.getAll("routines");
-}
-
-export async function addRoutine(routine) {
-  const db = await getDB();
-  return db.add("routines", routine);
-}
-
-export async function updateRoutine(id, data) {
-  const db = await getDB();
-  await db.put("routines", { ...data, id });
-}
-
-export async function deleteRoutine(id) {
-  const db = await getDB();
-  await db.delete("routines", id);
 }
 
 /* ---------- backup / restore ---------- */
